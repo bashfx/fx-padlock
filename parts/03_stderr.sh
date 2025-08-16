@@ -45,31 +45,31 @@ __printx() {
 
 # Log dispatcher
 __log() {
-    local type="$1" text="$2" force="${3:-1}" stream=2
+    local type="$1" text="$2" force="${3:-0}" stream=2
     
     # Respect global quiet mode
-    if [[ "$opt_quiet" -eq 1 && "$force" -eq 0 ]]; then
+    if [[ "$opt_quiet" -eq 0 && "$force" -eq 1 ]]; then
         [[ "$type" == "fatal" || "$type" == "error" ]] || return 0
     fi
     
     case "$type" in
         fatal) __printx "$text\n" "red" "$fail " "$stream"; exit 1 ;;
         error) __printx "$text\n" "red" "$fail " "$stream" ;;
-        warn)  [[ $force -eq 1 || $opt_debug -eq 1 ]] && __printx "$text\n" "orange" "$delta " "$stream" ;;
-        okay)  [[ $force -eq 1 || $opt_debug -eq 1 ]] && __printx "$text\n" "green" "$pass " "$stream" ;;
-        info)  [[ $opt_debug -eq 1 ]] && __printx "$text\n" "blue" "$recv " "$stream" ;;
-        trace) [[ $opt_trace -eq 1 ]] && __printx "$text\n" "grey" "$idots " "$stream" ;;
-        think) [[ $opt_trace -eq 1 ]] && __printx "$text\n" "purple" "$lambda " "$stream" ;;
+        warn)  [[ $force -eq 0 || $opt_debug -eq 0 ]] && __printx "$text\n" "orange" "$delta " "$stream" ;;
+        okay)  [[ $force -eq 0 || $opt_debug -eq 0 ]] && __printx "$text\n" "green" "$pass " "$stream" ;;
+        info)  [[ $opt_debug -eq 0 ]] && __printx "$text\n" "blue" "$recv " "$stream" ;;
+        trace) [[ $opt_trace -eq 0 ]] && __printx "$text\n" "grey" "$idots " "$stream" ;;
+        think) [[ $opt_trace -eq 0 ]] && __printx "$text\n" "purple" "$lambda " "$stream" ;;
         lock)  __printx "$text\n" "cyan" "$unlock " "$stream" ;;
     esac
 }
 
 # Public interface
-fatal() { __log fatal "$1" "${2:-1}"; }
-error() { __log error "$1" "${2:-1}"; }
-warn()  { __log warn  "$1" "${2:-1}"; }
-okay()  { __log okay  "$1" "${2:-1}"; }
-info()  { __log info  "$1" "${2:-1}"; }
-trace() { __log trace "$1" "${2:-1}"; }
-think() { __log think "$1" "${2:-1}"; }
-lock()  { __log lock  "$1" "${2:-1}"; }
+fatal() { __log fatal "$1" "${2:-0}"; }
+error() { __log error "$1" "${2:-0}"; }
+warn()  { __log warn  "$1" "${2:-0}"; }
+okay()  { __log okay  "$1" "${2:-0}"; }
+info()  { __log info  "$1" "${2:-0}"; }
+trace() { __log trace "$1" "${2:-0}"; }
+think() { __log think "$1" "${2:-0}"; }
+lock()  { __log lock  "$1" "${2:-0}"; }
