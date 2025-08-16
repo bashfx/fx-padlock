@@ -29,12 +29,25 @@ is_unlocked() {
 
 # Mid-level helpers
 _get_repo_root() {
-    local target_dir="${1:-.}"
-    if [[ -d "$target_dir/.git" ]] || [[ -d "$target_dir/.gitsim" ]]; then
-        realpath "$target_dir"
-    else
-        fatal "Not a git repository: $target_dir"
+    local start_dir="${1:-.}"
+    local current_dir
+    current_dir=$(realpath "$start_dir")
+
+    while [[ "$current_dir" != "/" ]]; do
+        if [[ -d "$current_dir/.git" ]] || [[ -d "$current_dir/.gitsim" ]]; then
+            echo "$current_dir"
+            return 0
+        fi
+        current_dir=$(dirname "$current_dir")
+    done
+
+    # Check root ('/') directory as a last resort
+    if [[ -d "$current_dir/.git" ]] || [[ -d "$current_dir/.gitsim" ]]; then
+        echo "$current_dir"
+        return 0
     fi
+
+    fatal "Not a git or gitsim repository"
 }
 
 _get_lock_state() {

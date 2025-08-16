@@ -46,12 +46,12 @@ __printx() {
 # Log dispatcher
 __log() {
     local type="$1" text="$2" force="${3:-0}" stream=2
-    
+
     # Respect global quiet mode
     if [[ "$opt_quiet" -eq 0 && "$force" -eq 1 ]]; then
         [[ "$type" == "fatal" || "$type" == "error" ]] || return 0
     fi
-    
+
     case "$type" in
         fatal) __printx "$text\n" "red" "$fail " "$stream"; exit 1 ;;
         error) __printx "$text\n" "red" "$fail " "$stream" ;;

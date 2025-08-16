@@ -37,8 +37,21 @@ __print_age_wrapper() {
 #!/usr/bin/env bash
 set -euo pipefail
 
+_find_root() {
+    local dir="$PWD"
+    while [[ "$dir" != "/" ]]; do
+        if [[ -d "$dir/.git" ]] || [[ -d "$dir/.gitsim" ]]; then
+            echo "$dir"
+            return 0
+        fi
+        dir=$(dirname "$dir")
+    done
+    if [[ -d "$dir/.git" ]] || [[ -d "$dir/.gitsim" ]]; then echo "$dir"; return 0; fi
+    return 1
+}
+
 MODE="${1:-}"
-REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+REPO_ROOT="$(_find_root)"
 CRYPTO_CONFIG="$REPO_ROOT/locker/.padlock"
 LOCKER_DIR="$REPO_ROOT/locker"
 LOCKER_BLOB="$REPO_ROOT/locker.age"
@@ -111,18 +124,42 @@ __print_hook() {
     local hook_type="$2"
     local repo_root="$3"
     
+    # Define the finder function once to be used in all hooks
+    local finder_func
+    finder_func=$(cat << 'FINDER_EOF'
+_find_root() {
+    local dir="$PWD"
+    while [[ "$dir" != "/" ]]; do
+        if [[ -d "$dir/.git" ]] || [[ -d "$dir/.gitsim" ]]; then
+            echo "$dir"
+            return 0
+        fi
+        dir=$(dirname "$dir")
+    done
+    if [[ -d "$dir/.git" ]] || [[ -d "$dir/.gitsim" ]]; then echo "$dir"; return 0; fi
+    return 1
+}
+REPO_ROOT="$(_find_root)"
+FINDER_EOF
+)
+
     case "$hook_type" in
         "pre-commit")
-            cat > "$file" << 'HOOK_EOF'
+            cat > "$file" << HOOK_EOF
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO_ROOT="$(git rev-parse --show-toplevel)"
+$finder_func
 
-if [[ -d "$REPO_ROOT/locker" ]] && [[ -n "$(find "$REPO_ROOT/locker" -type f 2>/dev/null)" ]]; then
+if [[ -d "\$REPO_ROOT/locker" ]] && [[ -n "\$(find "\$REPO_ROOT/locker" -type f 2>/dev/null)" ]]; then
     echo "🔐 Encrypting locker/ → locker.age"
-    if "$REPO_ROOT/bin/padlock" lock; then
-        git add locker.age
+    if "\$REPO_ROOT/bin/padlock" lock; then
+        # This part is tricky because gitsim doesn't have a staging area like git.
+        # For real git, this is correct. For gitsim, this command will fail.
+        # This is an acceptable limitation for now.
+        if [[ -d "\$REPO_ROOT/.git" ]]; then
+            git add locker.age
+        fi
     else
         echo "✗ Failed to encrypt locker" >&2
         exit 1
@@ -131,15 +168,15 @@ fi
 HOOK_EOF
             ;;
         "post-checkout")
-            cat > "$file" << 'HOOK_EOF'
+            cat > "$file" << HOOK_EOF
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO_ROOT="$(git rev-parse --show-toplevel)"
+$finder_func
 
-if [[ -f "$REPO_ROOT/locker.age" ]] && [[ ! -d "$REPO_ROOT/locker" ]]; then
+if [[ -f "\$REPO_ROOT/locker.age" ]] && [[ ! -d "\$REPO_ROOT/locker" ]]; then
     echo "🔓 Auto-unlocking locker..."
-    if ! "$REPO_ROOT/bin/padlock" unlock 2>/dev/null; then
+    if ! "\$REPO_ROOT/bin/padlock" unlock 2>/dev/null; then
         echo "⚠️  Cannot auto-unlock (missing keys?)"
         echo "    Run: source .locked"
     fi
@@ -147,15 +184,16 @@ fi
 HOOK_EOF
             ;;
         "post-merge")
-            cat > "$file" << 'HOOK_EOF'
+            cat > "$file" << HOOK_EOF
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO_ROOT="$(git rev-parse --show-toplevel)"
+$finder_func
 
-if git diff --name-only HEAD@{1} HEAD 2>/dev/null | grep -q "^locker.age$"; then
+# For real git. This will not work for gitsim. Acceptable limitation.
+if [[ -d "\$REPO_ROOT/.git" ]] && git diff --name-only HEAD@{1} HEAD 2>/dev/null | grep -q "^locker.age$"; then
     echo "🔄 Locker updated in merge, refreshing..."
-    if ! "$REPO_ROOT/bin/padlock" unlock 2>/dev/null; then
+    if ! "\$REPO_ROOT/bin/padlock" unlock 2>/dev/null; then
         echo "⚠️  Cannot decrypt updated locker (missing keys?)"
     fi
 fi
@@ -179,7 +217,6 @@ export AGE_RECIPIENTS='${AGE_RECIPIENTS:-}'
 export AGE_KEY_FILE='${AGE_KEY_FILE:-}'
 export AGE_PASSPHRASE='${AGE_PASSPHRASE:-}'
 export PADLOCK_REPO='$REPO_ROOT'
-export PADLOCK_VERSION='$PADLOCK_VERSION'
 
 # Project-specific settings
 export PROJECT_NAME='$repo_name'
