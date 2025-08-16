@@ -1,0 +1,15 @@
+
+# Padlock Build Map  
+# Format: NN : target_filename.sh
+# Lines starting with # are ignored
+# Place this file in: parts/build.map
+
+01 : 01_header.sh
+02 : 02_config.sh  
+03 : 03_stderr.sh
+04 : 04_helpers.sh
+05 : 05_printers.sh
+06 : 06_api.sh
+07 : 07_core.sh
+08 : 08_main.sh
+09 : 09_footer.sh
