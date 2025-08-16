@@ -232,13 +232,14 @@ do_unlock() {
     __decrypt_stream < "$LOCKER_BLOB" | tar -C "$REPO_ROOT" -xzf -
     
     if [[ -d "$LOCKER_DIR" ]] && [[ -f "$LOCKER_CONFIG" ]]; then
-        # Remove .locked file since we're now unlocked
+        # Remove .locked file and locker.age since we're now unlocked
         rm -f "$REPO_ROOT/.locked"
+        rm -f "$LOCKER_BLOB"
         
         local file_count
         file_count=$(find "$LOCKER_DIR" -type f 2>/dev/null | wc -l)
         okay "Locker unlocked ($file_count files)"
-        info "Removed .locked file"
+        info "Removed .locked and locker.age"
     else
         error "Failed to unlock locker"
         return 1

@@ -56,51 +56,88 @@ rename_from_build_map() {
     
     printf "\n%sRenaming files according to build map...%s\n" "$yellow" "$x"
     
-    # Get all .sh files in parts directory
+    # 1. Get all .sh files in parts directory
     local all_files=()
     while IFS= read -r -d '' file; do
         all_files+=("$(basename "$file")")
     done < <(find "$PARTS_DIR" -name "*.sh" -print0)
-    
-    printf "%sDEBUG:%s Found %d files: %s\n" "$blue" "$x" "${#all_files[@]}" "${all_files[*]}"
-    
-    # Process each build map target
-    for num in "${!build_map_targets[@]}"; do
-        local target="${build_map_targets[$num]}"
-        
-        # Find file containing this number
-        local found_source=""
-        for i in "${!all_files[@]}"; do
-            local file="${all_files[$i]}"
-            if [[ "$file" =~ [^0-9]${num}[^0-9] ]] || [[ "$file" =~ ^${num}[^0-9] ]] || [[ "$file" =~ [^0-9]${num}$ ]]; then
-                found_source="$file"
-                # Remove from array (mark as processed)
-                unset all_files[$i]
+
+    # 2. Get all target filenames from build.map
+    local target_files=()
+    for target in "${build_map_targets[@]}"; do
+        target_files+=("$target")
+    done
+
+    # 3. Create a list of unprocessed files by filtering out correct ones
+    local unprocessed_files=()
+    local correct_files=()
+    for file in "${all_files[@]}"; do
+        local is_target=false
+        for target in "${target_files[@]}"; do
+            if [[ "$file" == "$target" ]]; then
+                is_target=true
+                correct_files+=("$file")
                 break
             fi
         done
-        
-        if [[ -n "$found_source" ]]; then
-            local source_path="$PARTS_DIR/$found_source"
-            local target_path="$PARTS_DIR/$target"
-            
-            if [[ "$found_source" != "$target" ]]; then
-                [[ -f "$target_path" ]] && rm -f "$target_path"
-                mv "$source_path" "$target_path"
-                printf "  %s✓%s %s → %s\n" "$green" "$x" "$found_source" "$target"
-            else
-                printf "  %s=%s %s (correct)\n" "$blue" "$x" "$target"
-            fi
-        else
-            printf "  %s✗%s No source for %s\n" "$red" "$x" "$num"
+        if [[ "$is_target" == false ]]; then
+            unprocessed_files+=("$file")
         fi
     done
-    
-    # Clean up unprocessed files with numbers
-    for file in "${all_files[@]}"; do
-        if [[ -n "$file" && "$file" =~ [0-9] ]]; then
-            printf "  %s🗑%s  Removing invalid: %s\n" "$red" "$x" "$file"
-            rm -f "$PARTS_DIR/$file"
+
+    if [[ ${#correct_files[@]} -gt 0 ]]; then
+        printf "  Found %d correctly named file(s): %s\n" "${#correct_files[@]}" "${correct_files[*]}"
+    fi
+    if [[ ${#unprocessed_files[@]} -gt 0 ]]; then
+        printf "  Found %d unprocessed file(s) to rename: %s\n" "${#unprocessed_files[@]}" "${unprocessed_files[*]}"
+    fi
+
+    # 4. Process the unprocessed files
+    for file in "${unprocessed_files[@]}"; do
+        # Extract number from filename.
+        local num
+        if ! num=$(echo "$file" | grep -oE '[0-9]+'); then
+            printf "  %sWARN:%s Could not extract number from '%s', skipping.\n" "$yellow" "$x" "$file"
+            continue
+        fi
+        
+        # We might get multiple numbers, take the first one.
+        num=$(echo "$num" | head -n1)
+        # Format to 2 digits (e.g., 3 -> 03)
+        printf -v num "%02d" "$num"
+
+        if [[ -n "${build_map_targets[$num]}" ]]; then
+            local target="${build_map_targets[$num]}"
+            local source_path="$PARTS_DIR/$file"
+            local target_path="$PARTS_DIR/$target"
+            printf "  %s✓%s Renaming %s → %s\n" "$green" "$x" "$file" "$target"
+            mv "$source_path" "$target_path"
+        else
+            printf "  %sWARN:%s No target in build.map for number '%s' (from file '%s'), skipping.\n" "$yellow" "$x" "$num" "$file"
+        fi
+    done
+
+    # 5. Cleanup: Get a fresh list of files and remove any not in the build map targets.
+    printf "\n%sCleaning up artifacts...%s\n" "$yellow" "$x"
+    local final_files=()
+    while IFS= read -r -d '' file; do
+        final_files+=("$(basename "$file")")
+    done < <(find "$PARTS_DIR" -name "*.sh" -print0)
+
+    for file in "${final_files[@]}"; do
+        local is_target=false
+        for target in "${target_files[@]}"; do
+            if [[ "$file" == "$target" ]]; then
+                is_target=true
+                break
+            fi
+        done
+        if [[ "$is_target" == false ]]; then
+            # As a safeguard, only remove files with numbers in them
+            if [[ "$file" =~ [0-9] ]]; then
+                printf "  %s🗑%s  Removing artifact: %s\n" "$red" "$x" "$file"
+                rm -f "$PARTS_DIR/$file"
+            fi
         fi
     done
     
