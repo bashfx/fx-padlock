@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# test_runner.sh - Basic tests for padlock.sh
+# test_runner.sh - Basic and E2E tests for padlock.sh
 
 # Exit immediately if a command exits with a non-zero status.
 set -e
@@ -123,9 +123,6 @@ run_e2e_test() {
 # Run all tests
 run_e2e_test "git"
 run_e2e_test "gitsim"
-
-# Run all tests
-run_e2e_test
 
 echo
 echo "================================"
