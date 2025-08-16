@@ -65,41 +65,64 @@ rename_from_build_map() {
     printf "%sDEBUG:%s Found %d files: %s\n" "$blue" "$x" "${#all_files[@]}" "${all_files[*]}"
     
     # Process each build map target
-    for num in "${!build_map_targets[@]}"; do
+    for num in $(printf '%s\n' "${!build_map_targets[@]}" | sort -n); do
         local target="${build_map_targets[$num]}"
-        
-        # Find file containing this number
         local found_source=""
+        local source_idx=-1
+
+        # Prioritize finding a "raw" part file (e.g., padlock_part_NN.sh)
         for i in "${!all_files[@]}"; do
             local file="${all_files[$i]}"
-            if [[ "$file" =~ [^0-9]${num}[^0-9] ]] || [[ "$file" =~ ^${num}[^0-9] ]] || [[ "$file" =~ [^0-9]${num}$ ]]; then
+            if [[ -n "$file" && "$file" != "$target" ]] && ([[ "$file" =~ [^0-9]${num}[^0-9] ]] || [[ "$file" =~ ^${num}[^0-9] ]] || [[ "$file" =~ [^0-9]${num}$ ]]); then
                 found_source="$file"
-                # Remove from array (mark as processed)
-                unset all_files[$i]
+                source_idx=$i
                 break
             fi
         done
+
+        # If no raw part found, look for the correctly named target file
+        if [[ -z "$found_source" ]]; then
+            for i in "${!all_files[@]}"; do
+                local file="${all_files[$i]}"
+                if [[ -n "$file" && "$file" == "$target" ]]; then
+                    found_source="$file"
+                    source_idx=$i
+                    break
+                fi
+            done
+        fi
         
         if [[ -n "$found_source" ]]; then
+            # We found our source file. Remove it from the processing list.
+            unset 'all_files[$source_idx]'
+
             local source_path="$PARTS_DIR/$found_source"
             local target_path="$PARTS_DIR/$target"
             
-            if [[ "$found_source" != "$target" ]]; then
-                [[ -f "$target_path" ]] && rm -f "$target_path"
+            if [[ "$source_path" != "$target_path" ]]; then
+                # This is a raw part that needs to be renamed.
+                # If the target file also exists in the list of all_files, it's an artifact that needs to be ignored in the cleanup.
+                for i in "${!all_files[@]}"; do
+                    if [[ -n "${all_files[$i]}" && "${all_files[$i]}" == "$target" ]]; then
+                        unset 'all_files[$i]'
+                        break
+                    fi
+                done
                 mv "$source_path" "$target_path"
                 printf "  %s✓%s %s → %s\n" "$green" "$x" "$found_source" "$target"
             else
+                # File is already correctly named.
                 printf "  %s=%s %s (correct)\n" "$blue" "$x" "$target"
             fi
         else
-            printf "  %s✗%s No source for %s\n" "$red" "$x" "$num"
+            printf "  %s✗%s No source for %s (%s)\n" "$red" "$x" "$num" "$target"
         fi
     done
     
-    # Clean up unprocessed files with numbers
+    # Clean up unprocessed files with numbers (anything left in all_files is an artifact)
     for file in "${all_files[@]}"; do
         if [[ -n "$file" && "$file" =~ [0-9] ]]; then
-            printf "  %s🗑%s  Removing invalid: %s\n" "$red" "$x" "$file"
+            printf "  %s🗑%s  Removing artifact: %s\n" "$red" "$x" "$file"
             rm -f "$PARTS_DIR/$file"
         fi
     done
