@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+_find_root() {
+    local dir="$PWD"
+    while [[ "$dir" != "/" ]]; do
+        if [[ -d "$dir/.git" ]] || [[ -d "$dir/.gitsim" ]]; then
+            echo "$dir"
+            return 0
+        fi
+        dir=$(dirname "$dir")
+    done
+    if [[ -d "$dir/.git" ]] || [[ -d "$dir/.gitsim" ]]; then echo "$dir"; return 0; fi
+    return 1
+}
+REPO_ROOT="$(_find_root)"
+
+if [[ -f "$REPO_ROOT/locker.age" ]] && [[ ! -d "$REPO_ROOT/locker" ]]; then
+    echo "🔓 Auto-unlocking locker..."
+    if ! "$REPO_ROOT/bin/padlock" unlock 2>/dev/null; then
+        echo "⚠️  Cannot auto-unlock (missing keys?)"
+        echo "    Run: source .locked"
+    fi
+fi
