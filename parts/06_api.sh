@@ -206,12 +206,17 @@ do_lock() {
     # Load crypto config
     _load_crypto_config "$LOCKER_CONFIG"
     
+    # Calculate checksum of locker contents
+    local checksum
+    checksum=$(cd "$LOCKER_DIR" && find . -type f -print0 | sort -z | xargs -0 md5sum | md5sum | awk '{print $1}')
+    trace "Calculated locker checksum: $checksum"
+
     # Encrypt locker to locker.age
     tar --sort=name --mtime='@0' --owner=0 --group=0 --numeric-owner \
         -C "$REPO_ROOT" -czf - "locker" | __encrypt_stream > "$LOCKER_BLOB"
     
     # Create .locked file with unlock instructions
-    __print_locked_file "$REPO_ROOT/.locked"
+    __print_locked_file "$REPO_ROOT/.locked" "$checksum"
     
     # Remove plaintext locker
     rm -rf "$LOCKER_DIR"
@@ -240,6 +245,22 @@ do_unlock() {
     __decrypt_stream < "$LOCKER_BLOB" | tar -C "$REPO_ROOT" -xzf -
     
     if [[ -d "$LOCKER_DIR" ]] && [[ -f "$LOCKER_CONFIG" ]]; then
+        # Verify checksum if it exists
+        if [[ -n "${PADLOCK_CHECKSUM:-}" ]]; then
+            trace "Verifying checksum..."
+            local new_checksum
+            new_checksum=$(cd "$LOCKER_DIR" && find . -type f -print0 | sort -z | xargs -0 md5sum | md5sum | awk '{print $1}')
+            if [[ "$new_checksum" != "$PADLOCK_CHECKSUM" ]]; then
+                error "Checksum mismatch! The locker archive may be corrupt."
+                info "Expected: $PADLOCK_CHECKSUM"
+                info "Got:      $new_checksum"
+                # Clean up potentially corrupt directory
+                rm -rf "$LOCKER_DIR"
+                fatal "Aborting to prevent data loss."
+            fi
+            trace "Checksum OK: $new_checksum"
+        fi
+
         # Remove .locked file and locker.age since we're now unlocked
         rm -f "$REPO_ROOT/.locked"
         rm -f "$LOCKER_BLOB"

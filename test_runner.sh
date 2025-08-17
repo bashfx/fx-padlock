@@ -100,6 +100,11 @@ run_e2e_test() {
         echo "ERROR: 'lock' did not remove locker/ and create locker.age + .locked"
         exit 1
     fi
+    # Check for checksum in .locked file
+    if ! grep -q "export PADLOCK_CHECKSUM=" .locked; then
+        echo "ERROR: .locked file does not contain PADLOCK_CHECKSUM"
+        exit 1
+    fi
     echo "OK"
 
     # 9. Run unlock (simulating `source .locked`)

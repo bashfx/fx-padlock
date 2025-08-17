@@ -29,11 +29,28 @@ This session focused on resolving build issues, improving script robustness, add
 - It runs a full end-to-end test of the `clamp` -> `lock` -> `unlock` workflow.
 - It is parameterized to run the end-to-end test against both a real `.git` repository and a simulated `.gitsim` repository, verifying all new functionality.
 
-## Future Concepts: Import/Export
+## Future Concepts
+
+### Checksum Verification
+To ensure data integrity against corruption during the encryption/decryption cycle, a checksum verification mechanism should be implemented.
+- **Concept**:
+    - When `padlock lock` is executed, it will first calculate a deterministic checksum of the `locker/` directory's contents (e.g., using a combination of `find`, `sort`, and `md5sum`).
+    - This checksum will be stored as a variable within the generated `.locked` script.
+    - When `padlock unlock` (or `source .locked`) is run, it will read the checksum from the script, decrypt the archive, and then re-calculate the checksum of the newly created `locker/` directory.
+    - If the checksums do not match, the unlock process will fail with an error, preventing the use of potentially corrupt data.
+
+### Comprehensive `README.md`
+A detailed `README.md` is needed to provide a complete guide for users.
+- **Content**: The README should include:
+    - A clear overview of the "locker pattern" concept.
+    - A step-by-step user workflow guide.
+    - A complete reference for all commands and their flags (`clamp`, `lock`, `unlock`, `status`, `key`, `install`, `uninstall`).
+    - An explanation of the BashFX-compliant file structure (`~/.local/etc/padlock`, etc.).
+
+### Import/Export Functionality
 *(Deferred for now)*
 
 To enhance portability and make it easier for users to move their `padlock` environment between systems, an import/export feature could be developed.
-
 - **Concept**: Extend the `padlock key` command with `--export` and `--import` flags.
 - **`--export`**:
     - Would gather the central manifest file (`~/.local/etc/padlock/manifest.txt`).

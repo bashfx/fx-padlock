@@ -225,6 +225,7 @@ EOF
 
 __print_locked_file() {
     local file="$1"
+    local checksum="$2"
     
     cat > "$file" << EOF
 #!/bin/bash
@@ -242,6 +243,7 @@ echo "🔓 Unlocking padlock..."
 export AGE_RECIPIENTS='${AGE_RECIPIENTS:-}'
 export AGE_KEY_FILE='${AGE_KEY_FILE:-}'  
 export AGE_PASSPHRASE='${AGE_PASSPHRASE:-}'
+export PADLOCK_CHECKSUM='${checksum:-}'
 
 # Unlock the locker
 if bin/padlock unlock; then
