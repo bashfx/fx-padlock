@@ -36,4 +36,4 @@ opt_yes=0
 opt_dev=0
 
 # Bootstrap - ensure critical directories exist
-mkdir -p "$PADLOCK_ETC" "$PADLOCK_KEYS" 2>/dev/null || true
+mkdir -p "$PADLOCK_ETC" "$PADLOCK_KEYS"

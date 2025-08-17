@@ -124,6 +124,14 @@ do_clamp() {
     # Create SECURITY.md
     __print_security_md "$REPO_ROOT/SECURITY.md"
     
+    # Update manifest
+    local manifest_file="$PADLOCK_ETC/manifest.txt"
+    touch "$manifest_file"
+    if ! grep -q -F -x "$REPO_ROOT" "$manifest_file"; then
+        echo "$REPO_ROOT" >> "$manifest_file"
+        trace "Added $REPO_ROOT to manifest"
+    fi
+
     okay "Padlock deployment complete!"
     info "Add sensitive files to locker/ directory"
     info "Run 'bin/padlock status' to check state"
@@ -324,4 +332,74 @@ do_key() {
             return 1
             ;;
     esac
+}
+
+do_install() {
+    lock "Installing padlock for global use..."
+
+    local install_dir="$XDG_LIB_HOME/fx/padlock"
+    local bin_dir="$XDG_BIN_HOME/fx"
+    local link_path="$bin_dir/padlock"
+
+    mkdir -p "$install_dir"
+    mkdir -p "$bin_dir"
+
+    cp "$SCRIPT_PATH" "$install_dir/padlock.sh"
+    chmod +x "$install_dir/padlock.sh"
+    trace "Copied script to $install_dir"
+
+    ln -sf "$install_dir/padlock.sh" "$link_path"
+    trace "Created symlink at $link_path"
+
+    okay "Padlock installed successfully!"
+
+    # Check if the install directory is in the user's PATH
+    if ! [[ ":$PATH:" == *":$bin_dir:"* ]]; then
+        warn "The directory '$bin_dir' is not in your PATH."
+        info "Please add it to your shell's startup file (e.g., .bashrc, .zshrc):"
+        info "  export PATH=\"\$PATH:$bin_dir\""
+    fi
+}
+
+do_uninstall() {
+    local purge_all=false
+    if [[ "${1:-}" == "--purge-all-data" ]]; then
+        purge_all=true
+    fi
+
+    lock "Uninstalling padlock..."
+
+    local manifest_file="$PADLOCK_ETC/manifest.txt"
+    if [[ -f "$manifest_file" && -s "$manifest_file" ]]; then
+        if [[ "$purge_all" == true && "$opt_dev" -eq 1 ]]; then
+            warn "Purging all padlock data, including manifest and keys..."
+            rm -rf "$PADLOCK_ETC"
+            okay "All padlock data has been purged."
+        else
+            error "Padlock is still managing the following repositories:"
+            cat "$manifest_file"
+            info "Please manually remove padlock from these repositories before uninstalling."
+            info "To override this safety check and purge all keys and data, run with -D and --purge-all-data."
+            return 1
+        fi
+    fi
+
+    local install_dir="$XDG_LIB_HOME/fx/padlock"
+    local link_path="$XDG_BIN_HOME/fx/padlock"
+
+    if [[ -L "$link_path" ]]; then
+        rm "$link_path"
+        okay "Removed symlink: $link_path"
+    fi
+
+    if [[ -d "$install_dir" ]]; then
+        rm -rf "$install_dir"
+        okay "Removed installation directory: $install_dir"
+    fi
+
+    if [[ "$purge_all" == false ]]; then
+        info "Keys and manifest file have been preserved in $PADLOCK_ETC"
+    fi
+
+    okay "Padlock uninstalled successfully."
 }
