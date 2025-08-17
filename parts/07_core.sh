@@ -25,6 +25,12 @@ dispatch() {
         key)
             do_key "$@"
             ;;
+        install)
+            do_install "$@"
+            ;;
+        uninstall)
+            do_uninstall "$@"
+            ;;
         help|--help|-h)
             usage
             ;;
@@ -68,6 +74,9 @@ COMMANDS:
       --set-global <key>      Store global key
       --show-global           Display global key
       --generate-global       Create new global key
+
+    install         Install padlock to your system for global access
+    uninstall       Remove padlock from your system
 
     help            Show this help
     version         Show version

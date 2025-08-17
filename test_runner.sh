@@ -73,6 +73,12 @@ run_e2e_test() {
         echo "ERROR: 'clamp' did not create locker/ and bin/padlock"
         exit 1
     fi
+    # Check manifest
+    local manifest_file="$HOME/.local/etc/padlock/manifest.txt"
+    if ! grep -q -F -x "$test_dir" "$manifest_file"; then
+        echo "ERROR: 'clamp' did not add repo to manifest"
+        exit 1
+    fi
     echo "OK"
 
     # 6. Create a test secret
@@ -120,9 +126,67 @@ run_e2e_test() {
     # The trap will handle cleanup
 }
 
+run_install_tests() {
+    echo
+    echo "=== Running Install/Uninstall Tests ==="
+    echo
+
+    # Define paths for clarity
+    local install_dir="$HOME/.local/lib/fx/padlock"
+    local link_path="$HOME/.local/bin/fx/padlock"
+    local padlock_etc_dir="$HOME/.local/etc/padlock"
+
+    # Cleanup any previous test runs
+    rm -rf "$install_dir" "$link_path" "$padlock_etc_dir"
+
+    # 1. Test install
+    echo "--> Testing 'padlock install'..."
+    ./padlock.sh install > /dev/null
+    if [ ! -f "$install_dir/padlock.sh" ] || [ ! -L "$link_path" ]; then
+        echo "ERROR: 'install' did not create script and symlink"
+        exit 1
+    fi
+    echo "OK"
+
+    # 2. Test safe uninstall (should fail)
+    echo "--> Testing safe 'uninstall' (should fail)..."
+    # First, clamp a repo to create a manifest entry
+    local test_dir
+    test_dir=$(mktemp -d)
+    # shellcheck disable=SC2064
+    trap "rm -rf '$test_dir'" EXIT
+    local original_dir
+    original_dir=$(pwd)
+    (cd "$test_dir" && git init -b main >/dev/null && "$original_dir/padlock.sh" clamp . --generate >/dev/null)
+    # Now, try to uninstall (it should fail because the manifest is not empty)
+    if ./padlock.sh uninstall > /dev/null; then
+        echo "ERROR: 'uninstall' succeeded when it should have failed (safety check)."
+        exit 1
+    fi
+    # Clean up the test repo for the next step
+    rm -rf "$test_dir"
+    echo "OK"
+
+    # 3. Test forced uninstall
+    echo "--> Testing forced 'uninstall --purge-all-data'..."
+    # We need to re-clamp a repo to have something to purge
+    test_dir=$(mktemp -d)
+    # shellcheck disable=SC2064
+    trap "rm -rf '$test_dir'" EXIT
+    (cd "$test_dir" && git init -b main >/dev/null && "$original_dir/padlock.sh" clamp . --generate >/dev/null)
+    # Now run the forced purge uninstall
+    ./padlock.sh -D uninstall --purge-all-data > /dev/null
+    if [ -d "$padlock_etc_dir" ] || [ -L "$link_path" ] || [ -d "$install_dir" ]; then
+        echo "ERROR: Forced 'uninstall' did not remove all data and script files"
+        exit 1
+    fi
+    echo "OK"
+}
+
 # Run all tests
 run_e2e_test "git"
 run_e2e_test "gitsim"
+run_install_tests
 
 echo
 echo "================================"
