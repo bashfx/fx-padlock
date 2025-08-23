@@ -1,5 +1,3 @@
-# REPLACE the existing do_clamp function in parts/06_api.sh with this enhanced version:
-
 do_clamp() {
     local target_path="${1:-.}"
     local use_global_key=false
@@ -153,23 +151,7 @@ do_clamp() {
     echo
     printf "%bNext steps:%b\n" "$cyan" "$xx"
     if [[ "$use_ignition" == true ]]; then
-        echo "  • 🔥 Ignition key: $ignition_key"
-        echo "  • Share this key for AI/automation access"
-        echo "  • Edit files in locker/ or use chest mode"
-    else
-        echo "  • Edit files in locker/docs_sec/ and locker/conf_sec/"
-        echo "  • Run 'git add . && git commit' to encrypt"
-    fi
-    echo "  • 🗝️  Master key configured as backup"
-    echo "  • Run 'bin/padlock status' to check state"
-} Final success message
-    okay "✓ Padlock deployed successfully"
-    
-    # Show next steps based on mode
-    echo
-    printf "%bNext steps:%b\n" "$cyan" "$xx"
-    if [[ "$use_ignition" == true ]]; then
-        echo "  • 🔥 Ignition key: $ignition_key"
+        printf "  • 🔥 Ignition key: %b%s%b\n" "$cyan" "$ignition_key" "$xx"
         echo "  • Share this key for AI/automation access"
         echo "  • Edit files in locker/ or use chest mode"
     else
@@ -180,7 +162,6 @@ do_clamp() {
     echo "  • Run 'bin/padlock status' to check state"
 }
 
-# REPLACE the existing do_status function with this enhanced version:
 do_status() {
     local repo_root="$(_get_repo_root .)"
     
@@ -234,7 +215,6 @@ do_status() {
     fi
 }
 
-# REPLACE the existing do_lock function with this enhanced version:
 do_lock() {
     # Early validation
     if [[ ! -d "$PWD/locker" ]]; then
@@ -271,8 +251,12 @@ do_lock() {
         size=$(du -h locker.age | cut -f1)
         okay "✓ Locked: locker/ → locker.age ($size)"
         
+    # Calculate checksum
+    local checksum
+    checksum=$(find locker -type f -exec md5sum {} \; 2>/dev/null | sort | md5sum | cut -d' ' -f1)
+
         # Create enhanced .locked script
-        __print_enhanced_locked_file ".locked"
+    __print_enhanced_locked_file ".locked" "$AGE_KEY_FILE" "$checksum"
         
         # Remove plaintext locker
         rm -rf locker
@@ -289,7 +273,6 @@ do_lock() {
     fi
 }
 
-# REPLACE the existing do_unlock function with this enhanced version:
 do_unlock() {
     # Early validation
     if [[ ! -f "locker.age" ]]; then
@@ -344,8 +327,6 @@ do_unlock() {
         fatal "Failed to decrypt locker.age"
     fi
 }
-
-# ADD these new functions to parts/06_api.sh:
 
 # Enhanced manifest management
 _add_to_manifest() {
@@ -409,6 +390,7 @@ EOF
 
 # Master unlock command
 do_master_unlock() {
+    lock "🔑 Unlocking with master key..."
     if ! _master_unlock; then
         return 1
     fi
@@ -418,22 +400,26 @@ do_master_unlock() {
     warn "⚠️  Secrets are now in plaintext - DO NOT commit locker/"
 }
 
-# Ignition unlock command  
+# Ignition unlock command
 do_ignite() {
     local action="$1"
     
     case "$action" in
         --unlock|-u)
+            lock "🔥 Unlocking with ignition key..."
             if ! _ignition_unlock; then
                 return 1
             fi
             okay "✓ Chest unlocked with ignition key"
+            info "🔓 Locker is now accessible"
             ;;
         --lock|-l)
+            lock "🔥 Securing locker in chest..."
             if ! _ignition_lock; then
                 return 1
             fi
             okay "✓ Locker secured in chest"
+            info "🔒 Locker is now encrypted"
             ;;
         --status|-s)
             _chest_status
@@ -446,7 +432,6 @@ do_ignite() {
     esac
 }
 
-# UPDATE the existing do_install function to include master key generation:
 do_install() {
     local force="${1:-0}"
     

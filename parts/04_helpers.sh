@@ -211,3 +211,51 @@ __decrypt_stream() {
         fatal "No decryption key available"
     fi
 }
+
+_validate_clamp_target() {
+    local target_path="$1"
+    if ! is_git_repo "$target_path"; then
+        fatal "Target is not a git repository: $target_path"
+    fi
+    return 0
+}
+
+_setup_crypto_with_master() {
+    local key_file="$1"
+    local use_ignition="$2"
+    local ignition_key="$3"
+
+    AGE_KEY_FILE="$key_file"
+
+    if [[ "$use_ignition" == "true" ]]; then
+        AGE_PASSPHRASE="$ignition_key"
+    else
+        AGE_RECIPIENTS=$(age-keygen -y "$key_file" 2>/dev/null)
+    fi
+
+    __print_padlock_config "$LOCKER_CONFIG" "$(basename "$REPO_ROOT")"
+}
+
+_generate_ignition_key() {
+    # Not implemented
+    echo "flame-rocket-boost-spark"
+}
+
+__print_padlock_config() {
+    local file="$1"
+    local repo_name="$2"
+
+    cat > "$file" << EOF
+#!/bin/bash
+# Padlock configuration for $repo_name
+# This file is only present when locker is unlocked
+
+export AGE_RECIPIENTS='${AGE_RECIPIENTS:-}'
+export AGE_KEY_FILE='${AGE_KEY_FILE:-}'
+export AGE_PASSPHRASE='${AGE_PASSPHRASE:-}'
+export PADLOCK_REPO='$REPO_ROOT'
+
+# Project-specific settings
+export PROJECT_NAME='$repo_name'
+EOF
+}
