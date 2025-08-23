@@ -162,6 +162,22 @@ do_clamp() {
     fi
     echo "  • 🗝️  Master key configured as backup"
     echo "  • Run 'bin/padlock status' to check state"
+} Final success message
+    okay "✓ Padlock deployed successfully"
+    
+    # Show next steps based on mode
+    echo
+    printf "%bNext steps:%b\n" "$cyan" "$xx"
+    if [[ "$use_ignition" == true ]]; then
+        echo "  • 🔥 Ignition key: $ignition_key"
+        echo "  • Share this key for AI/automation access"
+        echo "  • Edit files in locker/ or use chest mode"
+    else
+        echo "  • Edit files in locker/docs_sec/ and locker/conf_sec/"
+        echo "  • Run 'git add . && git commit' to encrypt"
+    fi
+    echo "  • 🗝️  Master key configured as backup"
+    echo "  • Run 'bin/padlock status' to check state"
 }
 
 # REPLACE the existing do_status function with this enhanced version:
