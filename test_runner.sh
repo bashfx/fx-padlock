@@ -106,10 +106,9 @@ run_e2e_test() {
     fi
     echo "OK"
 
-    # 9. Run unlock (simulating `source .locked`)
-    echo "--> Simulating 'source .locked' to unlock..."
-    # shellcheck source=.locked
-    source ./.locked > /dev/null
+    # 9. Run unlock
+    echo "--> Running 'padlock unlock'..."
+    ./bin/padlock unlock > /dev/null
     echo "OK"
 
     # 10. Check that unlock worked

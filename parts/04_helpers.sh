@@ -206,7 +206,7 @@ __decrypt_stream() {
     if [[ -n "${AGE_KEY_FILE:-}" && -f "$AGE_KEY_FILE" ]]; then
         age -d -i "$AGE_KEY_FILE"
     elif [[ -n "${AGE_PASSPHRASE:-}" ]]; then
-        AGE_PASSPHRASE="$AGE_PASSPHRASE" age -d -p
+        AGE_PASSPHRASE="$AGE_PASSPHRASE" age -d
     else
         fatal "No decryption key available"
     fi
