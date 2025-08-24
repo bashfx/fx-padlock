@@ -52,7 +52,10 @@ _get_repo_root() {
 
 _get_lock_state() {
     local repo_root="$1"
-    if is_locked "$repo_root"; then
+    # Prioritize chest state if it exists, as it's the more modern format.
+    if [[ -d "$repo_root/.chest" ]]; then
+        echo "locked"
+    elif is_locked "$repo_root"; then # Standard lock file
         echo "locked"
     elif is_unlocked "$repo_root"; then
         echo "unlocked"
@@ -248,6 +251,79 @@ _setup_crypto_with_master() {
     fi
 
     __print_padlock_config "$LOCKER_CONFIG" "$(basename "$REPO_ROOT")"
+}
+
+# Guard function for chest mode
+is_chest_repo() {
+    [[ -d "$1/.chest" ]]
+}
+
+# State-getter for chest mode
+get_chest_state() {
+    if is_chest_repo "$REPO_ROOT"; then
+        echo "locked"
+    elif [[ -d "$REPO_ROOT/locker" ]]; then
+        echo "unlocked"
+    else
+        echo "unknown"
+    fi
+}
+
+# Wrapper for ignition lock process
+_lock_chest() {
+    if [[ ! -d "$REPO_ROOT/locker" ]]; then
+        error "Locker directory not found, cannot lock chest."
+        return 1
+    fi
+    info "🗃️  Securing locker in .chest..."
+
+    # Load config from inside the locker to get recipients/passphrase
+    source "$REPO_ROOT/locker/.padlock"
+
+    # Encrypt locker directly into the chest
+    local chest_blob="$REPO_ROOT/.chest/locker.age"
+    mkdir -p "$REPO_ROOT/.chest"
+    if tar -czf - -C "$REPO_ROOT" locker | __encrypt_stream > "$chest_blob"; then
+        # Remove plaintext locker *after* success
+        rm -rf "$REPO_ROOT/locker"
+        okay "✓ Chest locked. Plaintext locker removed."
+        return 0
+    else
+        error "Failed to encrypt locker into chest."
+        # Cleanup failed attempt
+        rm -f "$chest_blob"
+        return 1
+    fi
+}
+
+# Wrapper for ignition unlock process
+_unlock_chest() {
+    local chest_blob="$REPO_ROOT/.chest/locker.age"
+    if [[ ! -f "$chest_blob" ]]; then
+        error "Chest blob not found, cannot unlock."
+        return 1
+    fi
+    info "🗃️  Unlocking locker from .chest..."
+
+    # We need the passphrase from the environment for ignition
+    if [[ -z "${PADLOCK_IGNITION_PASS:-}" ]]; then
+        error "Ignition key not found in environment variable PADLOCK_IGNITION_PASS."
+        return 1
+    fi
+    export AGE_PASSPHRASE="$PADLOCK_IGNITION_PASS"
+
+    # Decrypt from chest into locker
+    if __decrypt_stream < "$chest_blob" | tar -xzf - -C "$REPO_ROOT"; then
+        # Remove chest *after* success
+        rm -rf "$REPO_ROOT/.chest"
+        okay "✓ Chest unlocked. Encrypted chest removed."
+        return 0
+    else
+        error "Failed to decrypt locker from chest."
+        # Cleanup failed attempt (remove partially extracted locker dir)
+        rm -rf "$REPO_ROOT/locker"
+        return 1
+    fi
 }
 
 _generate_ignition_key() {
