@@ -263,7 +263,8 @@ do_lock() {
 
         # Create a simple state file to indicate locked status
         touch .locked
-        
+
+
         # Remove plaintext locker *after* successful encryption and move
         rm -rf locker
         
@@ -408,10 +409,38 @@ do_master_unlock() {
     warn "⚠️  Secrets are now in plaintext - DO NOT commit locker/"
 }
 
-# Placeholder for unimplemented master unlock logic
+
 _master_unlock() {
-    error "Master unlock feature not fully implemented."
-    return 1
+    # Check if the global key exists
+    if [[ ! -f "$PADLOCK_GLOBAL_KEY" ]]; then
+        error "Master key not found at: $PADLOCK_GLOBAL_KEY"
+        info "This key is usually generated automatically on first install."
+        info "Try running 'padlock install' to generate it."
+        return 1
+    fi
+
+    # Early validation for locker.age
+    if [[ ! -f "locker.age" ]]; then
+        error "No encrypted locker found (locker.age missing)."
+        info "Cannot perform master unlock without locker.age."
+        return 1
+    fi
+
+    # Use the global key for decryption by setting AGE_KEY_FILE for __decrypt_stream
+    export AGE_KEY_FILE="$PADLOCK_GLOBAL_KEY"
+
+    info "Attempting decryption with master key..."
+    if __decrypt_stream < locker.age | tar -xzf -; then
+        rm -f locker.age .locked
+        info "Successfully unlocked with master key."
+        unset AGE_KEY_FILE
+        return 0
+    else
+        error "Failed to decrypt locker.age with master key."
+        unset AGE_KEY_FILE
+        return 1
+    fi
+
 }
 
 # Placeholders for unimplemented ignition features
