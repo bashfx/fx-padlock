@@ -260,9 +260,10 @@ do_lock() {
         # Calculate checksum
         local checksum
         checksum=$(find locker -type f -exec md5sum {} \; 2>/dev/null | sort | md5sum | cut -d' ' -f1)
-        
+
         # Create a simple state file to indicate locked status
         touch .locked
+
 
         # Remove plaintext locker *after* successful encryption and move
         rm -rf locker
@@ -408,6 +409,7 @@ do_master_unlock() {
     warn "⚠️  Secrets are now in plaintext - DO NOT commit locker/"
 }
 
+
 _master_unlock() {
     # Check if the global key exists
     if [[ ! -f "$PADLOCK_GLOBAL_KEY" ]]; then
@@ -438,6 +440,7 @@ _master_unlock() {
         unset AGE_KEY_FILE
         return 1
     fi
+
 }
 
 # Placeholders for unimplemented ignition features

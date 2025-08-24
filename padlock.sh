@@ -1198,6 +1198,7 @@ do_master_unlock() {
     warn "⚠️  Secrets are now in plaintext - DO NOT commit locker/"
 }
 
+
 _master_unlock() {
     # Check if the global key exists
     if [[ ! -f "$PADLOCK_GLOBAL_KEY" ]]; then
@@ -1228,6 +1229,7 @@ _master_unlock() {
         unset AGE_KEY_FILE
         return 1
     fi
+
 }
 
 # Placeholders for unimplemented ignition features
