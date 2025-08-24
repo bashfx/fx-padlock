@@ -264,7 +264,6 @@ do_lock() {
         # Create a simple state file to indicate locked status
         touch .locked
 
-
         # Remove plaintext locker *after* successful encryption and move
         rm -rf locker
         
@@ -409,7 +408,6 @@ do_master_unlock() {
     warn "⚠️  Secrets are now in plaintext - DO NOT commit locker/"
 }
 
-
 _master_unlock() {
     # Check if the global key exists
     if [[ ! -f "$PADLOCK_GLOBAL_KEY" ]]; then
@@ -440,7 +438,6 @@ _master_unlock() {
         unset AGE_KEY_FILE
         return 1
     fi
-
 }
 
 # Placeholders for unimplemented ignition features
@@ -480,25 +477,25 @@ _ignition_unlock() {
 do_ignite() {
     local action="$1"
     
+    # Set REPO_ROOT for the helpers, as this is a top-level command.
+    REPO_ROOT=$(_get_repo_root .)
+
     case "$action" in
         --unlock|-u)
-            lock "🔥 Unlocking with ignition key..."
-            if ! _ignition_unlock; then
-                return 1
-            fi
-            okay "✓ Chest unlocked with ignition key"
-            info "🔓 Locker is now accessible"
+            _unlock_chest
             ;;
         --lock|-l)
-            lock "🔥 Securing locker in chest..."
-            if ! _ignition_lock; then
-                return 1
-            fi
-            okay "✓ Locker secured in chest"
-            info "🔒 Locker is now encrypted"
+            _lock_chest
             ;;
         --status|-s)
-            _chest_status
+            # Simple status for now, can be enhanced later.
+            if [[ -d "$REPO_ROOT/.chest" ]]; then
+                info "Chest is LOCKED."
+            elif [[ -d "$REPO_ROOT/locker" ]]; then
+                info "Chest is UNLOCKED."
+            else
+                info "Chest status is unknown (not an ignition repo?)."
+            fi
             ;;
         *)
             error "Unknown ignition action: $action"

@@ -72,7 +72,7 @@ run_e2e_test() {
     echo "OK"
 
     # 5. Check that clamp worked
-    echo "--> Verifying clamp results..."
+    echo "--> Verifying clamp results (should have 'locker' dir)..."
     if [ ! -d "locker" ] || [ ! -f "bin/padlock" ]; then
         echo "ERROR: 'clamp' did not create locker/ and bin/padlock"
         exit 1
@@ -246,22 +246,28 @@ run_ignition_test() {
     echo "secret content" > locker/docs_sec/test.md
     echo "OK"
 
-    # 7. Run lock
-    echo "--> Running 'padlock lock'..."
-    # Need to add files for lock to work
-    $repo_cmd add . > /dev/null
-    ./bin/padlock lock > /dev/null
+    # 7. Run ignite --lock to engage the chest
+    echo "--> Running 'padlock ignite --lock'..."
+    ./bin/padlock ignite --lock > /dev/null
     echo "OK"
 
-    # 8. Run ignite --unlock
+    # 8. Check that the chest is locked correctly
+    echo "--> Verifying chest lock results..."
+    if [ -d "locker" ] || [ ! -d ".chest" ] || [ ! -f ".chest/locker.age" ]; then
+        echo "ERROR: 'ignite --lock' did not create .chest/ and remove locker/"
+        exit 1
+    fi
+    echo "OK"
+
+    # 9. Run ignite --unlock
     echo "--> Running 'padlock ignite --unlock'..."
     PADLOCK_IGNITION_PASS="$ignition_key" ./bin/padlock ignite --unlock > /dev/null
     echo "OK"
 
-    # 9. Check that unlock worked
-    echo "--> Verifying unlock results..."
-    if [ ! -d "locker" ] || [ -f "locker.age" ] || [ -f ".locked" ]; then
-        echo "ERROR: 'ignite --unlock' did not restore locker/ and remove locker.age + .locked"
+    # 10. Check that unlock worked
+    echo "--> Verifying chest unlock results..."
+    if [ ! -d "locker" ] || [ -d ".chest" ]; then
+        echo "ERROR: 'ignite --unlock' did not restore locker/ and remove .chest/"
         exit 1
     fi
     if [ ! -f "locker/docs_sec/test.md" ] || [[ "$(cat locker/docs_sec/test.md)" != "secret content" ]]; then
