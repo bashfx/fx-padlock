@@ -106,10 +106,9 @@ run_e2e_test() {
     fi
     echo "OK"
 
-    # 9. Run unlock (simulating `source .locked`)
-    echo "--> Simulating 'source .locked' to unlock..."
-    # shellcheck source=.locked
-    source ./.locked > /dev/null
+    # 9. Run unlock
+    echo "--> Running 'padlock unlock'..."
+    ./bin/padlock unlock > /dev/null
     echo "OK"
 
     # 10. Check that unlock worked
@@ -283,56 +282,67 @@ run_master_unlock_test() {
     echo "=== Running Master Unlock Test ==="
     echo
 
-    # 1. Create a temporary directory
+    # 1. Create temporary directories for test repo and fake XDG home
     local test_dir
     test_dir=$(mktemp -d)
+    local fake_xdg_etc
+    fake_xdg_etc=$(mktemp -d)
     echo "--> Created temp directory for test: $test_dir"
+    echo "--> Created fake XDG directory for master key: $fake_xdg_etc"
 
-    # 2. Setup a trap to clean up the directory on exit
+    # 2. Setup a trap to clean up the directories on exit
     # shellcheck disable=SC2064
-    trap "echo '--> Cleaning up temp directory...'; rm -rf '$test_dir'" EXIT
+    trap "echo '--> Cleaning up temp directories...'; rm -rf '$test_dir' '$fake_xdg_etc'" EXIT
+
+    # 3. Set the XDG_ETC_HOME to our fake directory
+    export XDG_ETC_HOME="$fake_xdg_etc"
 
     # Store current directory and cd into test dir
     local original_dir
     original_dir=$(pwd)
     cd "$test_dir"
 
-    # 3. Initialize a git repository
+    # 4. Initialize a git repository
     echo "--> Initializing git repo..."
     git init -b main > /dev/null
     git config user.email "test@example.com"
     git config user.name "Test User"
     echo "OK"
 
-    # 4. Deploy padlock
+    # 5. Run install to generate master key in our fake home
+    echo "--> Running 'padlock install' to generate master key..."
+    "$original_dir/padlock.sh" install > /dev/null
+    echo "OK"
+
+    # 6. Deploy padlock
     echo "--> Running 'padlock clamp'..."
     "$original_dir/padlock.sh" clamp . --generate > /dev/null
     echo "OK"
 
-    # 5. Create a test secret
+    # 7. Create a test secret
     echo "--> Creating a secret file..."
     mkdir -p locker/docs_sec
     echo "secret content" > locker/docs_sec/test.md
     echo "OK"
 
-    # 6. Run lock
+    # 8. Run lock
     echo "--> Running 'padlock lock'..."
-    # Need to add files for lock to work
     git add . > /dev/null
     ./bin/padlock lock > /dev/null
     echo "OK"
 
-    # 7. Remove the key to simulate key loss
-    echo "--> Simulating key loss..."
-    rm -rf "$HOME/.local/etc/padlock/keys"
+    # 9. Remove the REPO-SPECIFIC key to simulate key loss
+    echo "--> Simulating repository key loss..."
+    # Note: $XDG_ETC_HOME is our fake home
+    rm -f "$XDG_ETC_HOME/padlock/keys/$(basename "$test_dir").key"
     echo "OK"
 
-    # 8. Run master-unlock
+    # 10. Run master-unlock
     echo "--> Running 'padlock master-unlock'..."
     "$original_dir/padlock.sh" master-unlock > /dev/null
     echo "OK"
 
-    # 9. Check that unlock worked
+    # 11. Check that unlock worked
     echo "--> Verifying unlock results..."
     if [ ! -d "locker" ] || [ -f "locker.age" ] || [ -f ".locked" ]; then
         echo "ERROR: 'master-unlock' did not restore locker/ and remove locker.age + .locked"
@@ -346,6 +356,9 @@ run_master_unlock_test() {
 
     # Return to original directory
     cd "$original_dir"
+
+    # Unset the env var to avoid affecting other tests
+    unset XDG_ETC_HOME
 
     # The trap will handle cleanup
 }

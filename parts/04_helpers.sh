@@ -206,7 +206,7 @@ __decrypt_stream() {
     if [[ -n "${AGE_KEY_FILE:-}" && -f "$AGE_KEY_FILE" ]]; then
         age -d -i "$AGE_KEY_FILE"
     elif [[ -n "${AGE_PASSPHRASE:-}" ]]; then
-        AGE_PASSPHRASE="$AGE_PASSPHRASE" age -d -p
+        AGE_PASSPHRASE="$AGE_PASSPHRASE" age -d
     else
         fatal "No decryption key available"
     fi
@@ -230,7 +230,21 @@ _setup_crypto_with_master() {
     if [[ "$use_ignition" == "true" ]]; then
         AGE_PASSPHRASE="$ignition_key"
     else
-        AGE_RECIPIENTS=$(age-keygen -y "$key_file" 2>/dev/null)
+        # Ensure the global master key exists to be added as a recipient.
+        _ensure_master_key
+
+        # Get the public key of the repo-specific key.
+        local repo_recipient
+        repo_recipient=$(age-keygen -y "$key_file" 2>/dev/null)
+
+        # Get the public key of the global master key.
+        local master_recipient
+        master_recipient=$(age-keygen -y "$PADLOCK_GLOBAL_KEY" 2>/dev/null)
+
+        # Combine them. __encrypt_stream handles comma-separated lists.
+        AGE_RECIPIENTS="$repo_recipient,$master_recipient"
+        trace "Repo recipient: $repo_recipient"
+        trace "Master recipient: $master_recipient"
     fi
 
     __print_padlock_config "$LOCKER_CONFIG" "$(basename "$REPO_ROOT")"
@@ -239,6 +253,19 @@ _setup_crypto_with_master() {
 _generate_ignition_key() {
     # Not implemented
     echo "flame-rocket-boost-spark"
+}
+
+_ensure_master_key() {
+    if [[ ! -f "$PADLOCK_GLOBAL_KEY" ]]; then
+        info "🔑 Generating global master key..."
+        mkdir -p "$(dirname "$PADLOCK_GLOBAL_KEY")"
+        age-keygen -o "$PADLOCK_GLOBAL_KEY" >/dev/null
+        chmod 600 "$PADLOCK_GLOBAL_KEY"
+        okay "✓ Global master key created at: $PADLOCK_GLOBAL_KEY"
+        warn "⚠️  This key is your ultimate backup. Keep it safe."
+    else
+        trace "Global master key already exists."
+    fi
 }
 
 __print_padlock_config() {
