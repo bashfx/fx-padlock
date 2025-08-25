@@ -228,6 +228,35 @@ POST_MERGE_EOF
 }
 
 
+__print_overdrive_file() {
+    local file="$1"
+    local super_checksum="$2"
+
+    cat > "$file" << EOF
+#!/bin/bash
+# Overdrive unlock script
+# Generated: $(date)
+# Super checksum: $super_checksum
+
+if [[ "\${BASH_SOURCE[0]}" == "\${0}" ]]; then
+    echo "Usage: source .overdrive"
+    exit 1
+fi
+
+echo "🚀 Overdrive mode detected"
+echo "🔓 Unlocking entire repository..."
+
+if bin/padlock overdrive unlock; then
+    echo "✓ Repository restored from overdrive mode"
+    echo "⚠️  Remember to commit/push any changes before next overdrive"
+else
+    echo "✗ Failed to unlock overdrive mode"
+fi
+EOF
+    chmod +x "$file"
+}
+
+
 __print_starter_files() {
     local locker_dir="$1"
     

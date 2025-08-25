@@ -518,6 +518,71 @@ do_clean_manifest() {
     okay "✓ Manifest cleaned"
 }
 
+do_list() {
+    local filter="$1"
+    local manifest_file="$PADLOCK_ETC/manifest.txt"
+
+    if [[ ! -f "$manifest_file" || ! -s "$manifest_file" ]]; then
+        info "Manifest is empty or not found. No repositories tracked yet."
+        return
+    fi
+
+    case "$filter" in
+        --all)
+            awk -F'|' '!/^#/ { printf "%-15s %-20s %s (%s)\n", $1, $2, $3, $4 }' "$manifest_file"
+            ;;
+        --ignition)
+            awk -F'|' '!/^#/ && $4 == "ignition" && $9 !~ /temp=true/ { printf "%-15s %-20s %s\n", $1, $2, $3 }' "$manifest_file"
+            ;;
+        --namespace)
+            local ns="$2"
+            awk -F'|' -v namespace="$ns" '!/^#/ && $1 == namespace && $9 !~ /temp=true/ { printf "%-20s %s (%s)\n", $2, $3, $4 }' "$manifest_file"
+            ;;
+        *)
+            # Default: exclude temp directories, show namespace/name/path
+            awk -F'|' '!/^#/ && $9 !~ /temp=true/ && $3 !~ /\/tmp\// { printf "%-15s %-20s %s (%s)\n", $1, $2, $3, $4 }' "$manifest_file"
+            ;;
+    esac
+}
+
+do_clean_manifest() {
+    local manifest_file="$PADLOCK_ETC/manifest.txt"
+
+    if [[ ! -f "$manifest_file" || ! -s "$manifest_file" ]]; then
+        info "Manifest is empty or not found. Nothing to clean."
+        return
+    fi
+
+    local temp_file
+    temp_file=$(mktemp)
+
+    # Preserve header
+    grep "^#" "$manifest_file" > "$temp_file"
+
+    # Use a temporary variable to store the lines to keep
+    local lines_to_keep=""
+    while IFS= read -r line; do
+        # Skip comments
+        [[ "$line" =~ ^# ]] && continue
+
+        # Parse the line
+        IFS='|' read -r namespace name path type remote checksum created access metadata <<< "$line"
+
+        # Keep if the path exists and is not a temp path
+        if [[ -d "$path" && "$metadata" != *"temp=true"* && "$path" != */tmp/* ]]; then
+            lines_to_keep+="$line\n"
+        else
+            trace "Pruning from manifest: $namespace/$name ($path)"
+        fi
+    done < "$manifest_file"
+
+    # Write the kept lines to the temp file
+    printf "%b" "$lines_to_keep" >> "$temp_file"
+
+    mv "$temp_file" "$manifest_file"
+    okay "✓ Manifest cleaned"
+}
+
 # Enhanced manifest management
 _add_to_manifest() {
     local repo_path="$1"
@@ -563,6 +628,7 @@ _add_to_manifest() {
     if grep -q "|$repo_path|" "$manifest_file" 2>/dev/null; then
         trace "Manifest entry for $repo_path already exists. Skipping."
         return 0
+
     fi
 
     # Detect temp directories to add metadata
@@ -570,6 +636,7 @@ _add_to_manifest() {
     if [[ "$repo_path" == */tmp/* ]] || [[ "$repo_path" == */temp/* ]]; then
         metadata="temp=true"
     fi
+
 
     # Add new entry
     echo "$namespace|$repo_name|$repo_path|$repo_type|$remote_url|$checksum|$now|$now|$metadata" >> "$manifest_file"
@@ -911,7 +978,6 @@ do_rewind() {
     okay "✓ Rewound to snapshot: $snapshot_name"
 }
 
-
 do_install() {
     local force="${1:-0}"
     
@@ -941,4 +1007,151 @@ do_install() {
     okay "✓ Padlock installed to: $install_dir"
     info "Available as: $link_path"
     info "🗝️  Global master key configured"
+}
+
+_overdrive_unlock() {
+    REPO_ROOT=$(_get_repo_root .)
+
+    if [[ ! -f "$REPO_ROOT/super_chest.age" ]]; then
+        error "Repository not in overdrive mode"
+        return 1
+    fi
+
+    lock "🔓 Disengaging overdrive mode..."
+
+    if [[ ! -f "$PADLOCK_GLOBAL_KEY" ]]; then
+        error "Master key not found, cannot unlock overdrive mode."
+        info "Ensure your master key is available at $PADLOCK_GLOBAL_KEY"
+        return 1
+    fi
+    export AGE_KEY_FILE="$PADLOCK_GLOBAL_KEY"
+
+    local super_chest="$REPO_ROOT/.super_chest"
+    if ! __decrypt_stream < "$REPO_ROOT/super_chest.age" | tar -C "$REPO_ROOT" -xzf -; then
+        fatal "Failed to decrypt super_chest.age"
+    fi
+
+    if [[ -f "$REPO_ROOT/.overdrive" ]]; then
+        local expected_checksum
+        expected_checksum=$(grep "Super checksum:" "$REPO_ROOT/.overdrive" | cut -d' ' -f4)
+        local current_checksum
+        current_checksum=$(_calculate_locker_checksum "$super_chest")
+
+        if [[ "$current_checksum" != "$expected_checksum" ]]; then
+            warn "⚠️  Super chest integrity check failed!"
+        else
+            trace "✓ Super chest integrity verified"
+        fi
+    fi
+
+    cp -rT "$super_chest/" "$REPO_ROOT/"
+
+    rm -rf "$super_chest"
+    rm -f "$REPO_ROOT/super_chest.age"
+    rm -f "$REPO_ROOT/.overdrive"
+
+    okay "🔓 Overdrive disengaged! Repository restored."
+}
+
+_overdrive_status() {
+    REPO_ROOT=$(_get_repo_root .)
+
+    info "=== Overdrive Status ==="
+
+    if [[ -f "$REPO_ROOT/super_chest.age" ]]; then
+        local size
+        size=$(du -h "$REPO_ROOT/super_chest.age" 2>/dev/null | cut -f1)
+        warn "🚀 OVERDRIVE ENGAGED"
+        info "Blob: super_chest.age ($size)"
+        info "To restore: source .overdrive"
+    else
+        okay "✅ NORMAL MODE"
+        info "To engage: padlock overdrive lock"
+    fi
+}
+
+_overdrive_lock() {
+    REPO_ROOT=$(_get_repo_root .)
+
+    if [[ -f "$REPO_ROOT/super_chest.age" ]]; then
+        error "Repository already in overdrive mode"
+        return 1
+    fi
+
+    if [[ ! -d "$REPO_ROOT/locker" ]]; then
+        fatal "Locker must be unlocked to engage overdrive mode."
+    fi
+
+    lock "🚀 Engaging overdrive mode..."
+
+    # Create super_chest directory for staging
+    local super_chest="$REPO_ROOT/.super_chest"
+    mkdir -p "$super_chest"
+    trap 'rm -rf "$super_chest"' RETURN
+
+    # Copy everything except padlock infrastructure
+    local exclude_patterns=(
+        "bin"
+        ".chest"
+        ".super_chest"
+        "super_chest.age"
+        ".locked"
+        ".ignition.key"
+        ".git"
+        ".gitsim"
+        ".locker_checksum"
+        "locker.age"
+    )
+
+    info "Archiving entire repository..."
+
+    local exclude_file
+    exclude_file=$(mktemp)
+    printf "%s\n" "${exclude_patterns[@]}" > "$exclude_file"
+
+    rsync -a --exclude-from="$exclude_file" "$REPO_ROOT/" "$super_chest/" > /dev/null
+
+    rm -f "$exclude_file"
+
+    source "$REPO_ROOT/locker/.padlock"
+
+    local super_checksum
+    super_checksum=$(_calculate_locker_checksum "$super_chest")
+
+    tar --sort=name --mtime='@0' --owner=0 --group=0 --numeric-owner \
+        -C "$REPO_ROOT" -czf - ".super_chest" | __encrypt_stream > "$REPO_ROOT/super_chest.age"
+
+    # Remove everything except padlock infrastructure and super_chest.age
+    find "$REPO_ROOT" -maxdepth 1 -mindepth 1 \
+        ! -name "bin" \
+        ! -name ".chest" \
+        ! -name ".git" \
+        ! -name ".gitsim" \
+        ! -name "super_chest.age" \
+        -exec rm -rf {} +
+
+    __print_overdrive_file "$REPO_ROOT/.overdrive" "$super_checksum"
+
+    local size
+    size=$(du -h "$REPO_ROOT/super_chest.age" | cut -f1)
+    okay "🚀 Overdrive engaged! Entire repo → super_chest.age ($size)"
+}
+
+do_overdrive() {
+    local action="${1:-lock}"
+
+    case "$action" in
+        lock) _overdrive_lock ;;
+        unlock)
+            _overdrive_unlock
+            ;;
+        status)
+            _overdrive_status
+            ;;
+        *)
+            error "Unknown overdrive action: $action"
+            info "Usage: padlock overdrive {lock|unlock|status}"
+            return 1
+            ;;
+    esac
 }
