@@ -33,6 +33,9 @@ dispatch() {
         ignite)
             do_ignite "$@"
             ;;
+        rotate)
+            do_rotate "$@"
+            ;;
         help|--help|-h)
             usage
             ;;
@@ -78,6 +81,8 @@ COMMANDS:
       --unlock       Unlock chest with ignition key
       --lock         Lock locker into chest
       --status       Show chest status
+    rotate          Rotate keys
+      --ignition     Rotate the ignition key passphrase
 
     key             Manage encryption keys
       --set-global <key>      Store global key

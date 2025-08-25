@@ -228,12 +228,12 @@ run_ignition_test() {
     # 4. Deploy padlock with ignition
     echo "--> Running 'padlock clamp --ignition'..."
     local ignition_key
-    ignition_key=$("$original_dir/padlock.sh" clamp . --ignition | grep "Ignition key" | cut -d':' -f2 | xargs)
+    ignition_key=$("$original_dir/padlock.sh" clamp . --ignition 2>&1 | grep "Your ignition passphrase" | cut -d':' -f2 | xargs)
     echo "--> Ignition key: $ignition_key"
     echo "OK"
 
     # 5. Check that clamp worked
-    echo "--> Verifying clamp results..."
+    echo "--> Verifying clamp results (should have 'locker' dir)..."
     if [ ! -d "locker" ] || [ ! -f "bin/padlock" ]; then
         echo "ERROR: 'clamp' did not create locker/ and bin/padlock"
         exit 1
@@ -276,6 +276,39 @@ run_ignition_test() {
     fi
     echo "OK"
 
+    # 11. Lock the chest again to prepare for rotation test
+    echo "--> Locking chest again for rotation test..."
+    ./bin/padlock ignite --lock > /dev/null
+    echo "OK"
+
+    # 12. Rotate the ignition key
+    echo "--> Rotating ignition key..."
+    local new_ignition_key
+    # Pipe the old key into the command, then grep the output for the new key
+    new_ignition_key=$(echo "$ignition_key" | ./bin/padlock rotate --ignition | grep "Your new ignition passphrase" | cut -d':' -f2 | xargs)
+    echo "--> New ignition key: $new_ignition_key"
+    if [ -z "$new_ignition_key" ] || [ "$new_ignition_key" == "$ignition_key" ]; then
+        echo "ERROR: Key rotation failed or did not produce a new key."
+        exit 1
+    fi
+    echo "OK"
+
+    # 13. Unlock with the NEW key
+    echo "--> Unlocking with NEW ignition key..."
+    PADLOCK_IGNITION_PASS="$new_ignition_key" ./bin/padlock ignite --unlock > /dev/null
+    echo "OK"
+
+    # 14. Final verification
+    echo "--> Verifying final unlock results..."
+    if [ ! -d "locker" ] || [ -d ".chest" ]; then
+        echo "ERROR: 'ignite --unlock' with new key did not restore locker/ and remove .chest/"
+        exit 1
+    fi
+    if [[ "$(cat locker/docs_sec/test.md)" != "secret content" ]]; then
+        echo "ERROR: Secret file content is incorrect after final unlock."
+        exit 1
+    fi
+    echo "OK"
 
     # Return to original directory
     cd "$original_dir"

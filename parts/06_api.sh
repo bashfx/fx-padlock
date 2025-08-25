@@ -120,13 +120,13 @@ do_clamp() {
     
     # Enhanced crypto setup with master key integration
     if [[ "$use_ignition" == true ]]; then
-        # Generate ignition key if not provided
+        # Generate ignition passphrase if not provided by the user
         if [[ -z "$ignition_key" ]]; then
             ignition_key="$(_generate_ignition_key)"
         fi
         
-        _setup_crypto_with_master "$repo_key_file" "true" "$ignition_key"
-        info "🔥 Ignition mode configured"
+        # Call the new ignition system setup helper
+        _setup_ignition_system "$ignition_key"
         
         # Add to manifest as ignition type
         _add_to_manifest "$REPO_ROOT" "ignition"
@@ -500,6 +500,24 @@ do_ignite() {
         *)
             error "Unknown ignition action: $action"
             info "Available actions: --unlock, --lock, --status"
+            return 1
+            ;;
+    esac
+}
+
+do_rotate() {
+    local target="$1"
+
+    # Set REPO_ROOT for the helpers
+    REPO_ROOT=$(_get_repo_root .)
+
+    case "$target" in
+        -K|--ignition)
+            _rotate_ignition_key
+            ;;
+        *)
+            error "Unknown target for rotate: $target"
+            info "Usage: padlock rotate --ignition"
             return 1
             ;;
     esac
