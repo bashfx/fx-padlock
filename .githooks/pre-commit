@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# Pre-commit hook: Auto-encrypt locker if it exists
+
+_find_root() {
+    local dir="$PWD"
+    while [[ "$dir" != "/" ]]; do
+        if [[ -d "$dir/.git" ]] || [[ -d "$dir/.gitsim" ]]; then
+            echo "$dir"
+            return 0
+        fi
+        dir=$(dirname "$dir")
+    done
+    if [[ -d "$dir/.git" ]] || [[ -d "$dir/.gitsim" ]]; then echo "$dir"; return 0; fi
+    return 1
+}
+
+REPO_ROOT="$(_find_root)"
+LOCKER_DIR="$REPO_ROOT/locker"
+
+if [[ -d "$LOCKER_DIR" ]]; then
+    echo "🔒 Auto-encrypting locker before commit..."
+    if "$REPO_ROOT/bin/padlock" lock; then
+        echo "✓ Locker encrypted successfully"
+        git add locker.age .locked 2>/dev/null || true
+    else
+        echo "✗ Failed to encrypt locker" >&2
+        exit 1
+    fi
+fi
+
+exit 0

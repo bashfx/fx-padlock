@@ -33,48 +33,44 @@ load_config() {
 
 encrypt_locker() {
     if [[ ! -d "$LOCKER_DIR" ]]; then
-        echo "✗ Locker folder not found: $LOCKER_DIR" >&2
+        echo "No locker directory found" >&2
         exit 1
     fi
     
-    tar --sort=name --mtime='@0' --owner=0 --group=0 --numeric-owner \
-        -C "$REPO_ROOT" -czf - "locker" | encrypt_stream
-}
-
-decrypt_locker() {
-    [[ -d "$LOCKER_DIR" ]] && rm -rf "$LOCKER_DIR"
-    decrypt_stream | tar -C "$REPO_ROOT" -xzf -
-}
-
-encrypt_stream() {
+    load_config
+    
     if [[ -n "${AGE_RECIPIENTS:-}" ]]; then
-        IFS=',' read -ra RECIPS <<< "$AGE_RECIPIENTS"
-        local age_args=()
-        for recip in "${RECIPS[@]}"; do
-            age_args+=("-r" "$recip")
-        done
-        age "${age_args[@]}"
+        tar -czf - -C "$REPO_ROOT" locker | age -r "$AGE_RECIPIENTS"
     elif [[ -n "${AGE_PASSPHRASE:-}" ]]; then
-        AGE_PASSPHRASE="$AGE_PASSPHRASE" age -p
+        tar -czf - -C "$REPO_ROOT" locker | age -p
     else
-        echo "✗ No encryption method configured" >&2
+        echo "No encryption method configured" >&2
         exit 1
     fi
 }
 
-decrypt_stream() {
-    if [[ -n "${AGE_KEY_FILE:-}" && -f "$AGE_KEY_FILE" ]]; then
-        age -d -i "$AGE_KEY_FILE"
+decrypt_locker() {
+    load_config
+    
+    if [[ -n "${AGE_KEY_FILE:-}" ]]; then
+        age -d -i "$AGE_KEY_FILE" | tar -xzf - -C "$REPO_ROOT"
     elif [[ -n "${AGE_PASSPHRASE:-}" ]]; then
-        AGE_PASSPHRASE="$AGE_PASSPHRASE" age -d -p
+        age -d -p | tar -xzf - -C "$REPO_ROOT"
     else
-        echo "✗ No decryption key available" >&2
+        echo "No decryption method available" >&2
         exit 1
     fi
 }
 
 case "$MODE" in
-    "clean") load_config && encrypt_locker ;;
-    "smudge") load_config && decrypt_locker >/dev/null ;;
-    *) echo "Usage: age-wrapper {clean|smudge}"; exit 1 ;;
+    encrypt)
+        encrypt_locker
+        ;;
+    decrypt)
+        decrypt_locker
+        ;;
+    *)
+        echo "Usage: $0 {encrypt|decrypt}" >&2
+        exit 1
+        ;;
 esac
