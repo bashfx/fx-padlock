@@ -1,6 +1,0 @@
-# Padlock File Mapping
-# Format: source_path|destination_path
-# Paths are relative to repository root
-# Files listed here will be included in encrypted chest
-test_file.txt|test_file.txt
-test_file2.txt|test_file2.txt

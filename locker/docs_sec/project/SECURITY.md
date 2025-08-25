@@ -1,13 +1,13 @@
-# Security Information
+# Repository Security with Padlock
 
-This repository uses **Padlock** for transparent encryption of sensitive files.
+This repository uses **Padlock** for encrypting sensitive files using the `age` encryption tool.
 
 ## How It Works
 
 - **Locker Directory**: Sensitive files go in `locker/` (plaintext locally, never committed)
 - **Encrypted Storage**: Git stores `locker.age` (encrypted binary blob)
 - **State Files**: 
-  - `.locked` exists when secrets are encrypted (run `bin/padlock unlock` to decrypt)
+  - `.locked` exists when secrets are encrypted (run `source .locked` to unlock)
   - `locker/.padlock` exists when secrets are accessible (contains crypto config)
 
 ## Quick Start
@@ -16,8 +16,8 @@ This repository uses **Padlock** for transparent encryption of sensitive files.
 # Setup encryption (first time)
 bin/padlock setup
 
-# Unlock secrets
-bin/padlock unlock
+# Unlock secrets (when .locked file exists)
+source .locked
 
 # Lock secrets manually
 bin/padlock lock
@@ -41,6 +41,7 @@ locker/
 - `bin/padlock lock` - Encrypt locker/ → locker.age
 - `bin/padlock unlock` - Decrypt locker.age → locker/
 - `bin/padlock setup` - Initial encryption setup
+- `source .locked` - Unlock and source crypto config
 
 ## Team Sharing
 
@@ -50,25 +51,6 @@ bin/padlock key --add-recipient age1abc123...
 
 # Generate your public key to share
 bin/padlock key --show-global
-```
-
-## Master Key Emergency Access
-
-This repository includes a master key backup recipient. If you lose access to your 
-regular keys, you can unlock using:
-
-```bash
-padlock master-unlock
-```
-
-## Ignition Keys (AI Collaboration)
-
-If this repository uses ignition mode, you can share the ignition passphrase 
-with AI assistants for automated access:
-
-```bash
-export PADLOCK_IGNITION_PASS="your-ignition-key"
-bin/padlock unlock
 ```
 
 ## Notes
