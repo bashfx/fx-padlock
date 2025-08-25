@@ -260,6 +260,13 @@ do_lock() {
         # Calculate checksum
         local checksum
         checksum=$(find locker -type f -exec md5sum {} \; 2>/dev/null | sort | md5sum | cut -d' ' -f1)
+
+        # Calculate checksum of the original content and save it
+        local checksum
+        checksum=$(_calculate_locker_checksum "locker")
+        echo "$checksum" > .locker_checksum
+        trace "Saved checksum: $checksum"
+
         # Create a simple state file to indicate locked status
         touch .locked
 
@@ -320,8 +327,23 @@ do_unlock() {
         file_count=$(find locker -type f | wc -l)
         okay "✓ Unlocked: locker.age → locker/ ($file_count files)"
 
-        # Clean up encrypted file and state indicator
-        rm -f locker.age .locked
+        # Verify integrity against the stored checksum
+        if [[ -f ".locker_checksum" ]]; then
+            local expected_checksum
+            expected_checksum=$(cat .locker_checksum)
+            local current_checksum
+            current_checksum=$(_calculate_locker_checksum "locker")
+
+            trace "Verifying checksum. Expected: $expected_checksum, Current: $current_checksum"
+            if [[ "$expected_checksum" == "$current_checksum" ]]; then
+                okay "✓ Locker integrity verified."
+            else
+                warn "Locker integrity check FAILED. Contents may differ from last lock."
+            fi
+        fi
+
+        # Clean up encrypted file and state indicators
+        rm -f locker.age .locked .locker_checksum
 
         info "Repository unlocked successfully. Your shell session is not affected."
         echo
@@ -332,7 +354,6 @@ do_unlock() {
 
     else
         fatal "Failed to decrypt locker.age. Check your key permissions or repository state."
-
     fi
 }
 
@@ -343,7 +364,6 @@ do_list() {
     if [[ ! -f "$manifest_file" || ! -s "$manifest_file" ]]; then
         info "Manifest is empty or not found. No repositories tracked yet."
         return
-
     fi
 
     case "$filter" in

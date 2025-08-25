@@ -36,14 +36,12 @@ dispatch() {
         rotate)
             do_rotate "$@"
             ;;
-
         list)
             do_list "$@"
             ;;
         clean-manifest)
             do_clean_manifest "$@"
             ;;
-
         help|--help|-h)
             usage
             ;;
