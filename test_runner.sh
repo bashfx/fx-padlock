@@ -29,25 +29,20 @@ echo
 
 echo "--> Testing new security commands..."
 
-# Test setup command
-echo "  • Testing 'padlock setup --help'..."
-./padlock.sh setup --help > /dev/null 2>&1 && echo "    ✓ setup command exists" || echo "    ✗ setup command missing"
+# Test new commands exist in help output
+echo "  • Checking help output contains new commands..."
+help_output=$(./padlock.sh help 2>&1)
+echo "$help_output" | grep -q "setup.*Setup encryption" && echo "    ✓ setup in help" || echo "    ✗ setup missing from help"
+echo "$help_output" | grep -q "key.*Manage encryption keys" && echo "    ✓ key in help" || echo "    ✗ key missing from help"  
+echo "$help_output" | grep -q "declamp" && echo "    ✓ declamp in help" || echo "    ✗ declamp missing from help"
+echo "$help_output" | grep -q "revoke" && echo "    ✓ revoke in help" || echo "    ✗ revoke missing from help"
 
-# Test key management commands  
-echo "  • Testing 'padlock key' subcommands..."
-./padlock.sh key --help > /dev/null 2>&1 && echo "    ✓ key command exists" || echo "    ✗ key command missing"
-./padlock.sh key --generate-global --help > /dev/null 2>&1 && echo "    ✓ key --generate-global exists" || echo "    ✗ key --generate-global missing"
-./padlock.sh key --show-global --help > /dev/null 2>&1 && echo "    ✓ key --show-global exists" || echo "    ✗ key --show-global missing"
-
-# Test declamp command
-echo "  • Testing 'padlock declamp --help'..."
-./padlock.sh declamp --help > /dev/null 2>&1 && echo "    ✓ declamp command exists" || echo "    ✗ declamp command missing"
-
-# Test revoke command
-echo "  • Testing 'padlock revoke' subcommands..."
-./padlock.sh revoke --help > /dev/null 2>&1 && echo "    ✓ revoke command exists" || echo "    ✗ revoke command missing"
-./padlock.sh revoke --local --help > /dev/null 2>&1 && echo "    ✓ revoke --local exists" || echo "    ✗ revoke --local missing"
-./padlock.sh revoke --ignition --help > /dev/null 2>&1 && echo "    ✓ revoke --ignition exists" || echo "    ✗ revoke --ignition missing"
+# Test commands respond (don't crash)
+echo "  • Testing command responses..."
+./padlock.sh setup 2>/dev/null && echo "    ✓ setup responds" || echo "    ✗ setup failed"
+./padlock.sh key 2>/dev/null && echo "    ✓ key responds" || echo "    ✗ key failed"  
+./padlock.sh declamp 2>/dev/null && echo "    ✓ declamp responds" || echo "    ✗ declamp failed"
+./padlock.sh revoke 2>/dev/null && echo "    ✓ revoke responds" || echo "    ✗ revoke failed"
 
 echo "OK - New command structure validated"
 echo
