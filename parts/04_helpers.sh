@@ -298,6 +298,7 @@ _lock_chest() {
 
 # Wrapper for ignition unlock process
 _unlock_chest() {
+
     local encrypted_ignition_key_blob="$REPO_ROOT/.chest/ignition.age"
     local chest_blob="$REPO_ROOT/.chest/locker.age"
 
@@ -310,6 +311,7 @@ _unlock_chest() {
         error "Ignition key not found in environment variable PADLOCK_IGNITION_PASS."
         return 1
     fi
+
 
     info "🗃️  Unlocking locker from .chest using ignition passphrase..."
 
@@ -331,6 +333,7 @@ _unlock_chest() {
 
     if __decrypt_stream < "$chest_blob" | tar -xzf - -C "$REPO_ROOT"; then
         # Remove chest *after* successful decryption
+
         rm -rf "$REPO_ROOT/.chest"
         okay "✓ Chest unlocked. Encrypted chest removed."
         return 0
@@ -442,6 +445,7 @@ _ensure_master_key() {
     else
         trace "Global master key already exists."
     fi
+
 }
 
 __print_padlock_config() {

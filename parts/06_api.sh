@@ -260,7 +260,6 @@ do_lock() {
         # Calculate checksum
         local checksum
         checksum=$(find locker -type f -exec md5sum {} \; 2>/dev/null | sort | md5sum | cut -d' ' -f1)
-        
         # Create a simple state file to indicate locked status
         touch .locked
 
@@ -333,6 +332,7 @@ do_unlock() {
 
     else
         fatal "Failed to decrypt locker.age. Check your key permissions or repository state."
+
     fi
 }
 
@@ -343,6 +343,7 @@ do_list() {
     if [[ ! -f "$manifest_file" || ! -s "$manifest_file" ]]; then
         info "Manifest is empty or not found. No repositories tracked yet."
         return
+
     fi
 
     case "$filter" in
