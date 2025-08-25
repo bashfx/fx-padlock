@@ -261,6 +261,7 @@ do_lock() {
         local checksum
         checksum=$(find locker -type f -exec md5sum {} \; 2>/dev/null | sort | md5sum | cut -d' ' -f1)
 
+
         # Calculate checksum of the original content and save it
         local checksum
         checksum=$(_calculate_locker_checksum "locker")
@@ -269,6 +270,7 @@ do_lock() {
 
         # Create a simple state file to indicate locked status
         touch .locked
+        
 
         # Remove plaintext locker *after* successful encryption and move
         rm -rf locker
@@ -354,7 +356,37 @@ do_unlock() {
 
     else
         fatal "Failed to decrypt locker.age. Check your key permissions or repository state."
+
     fi
+
+    local temp_file
+    temp_file=$(mktemp)
+
+    # Preserve header
+    grep "^#" "$manifest_file" > "$temp_file"
+
+    # Use a temporary variable to store the lines to keep
+    local lines_to_keep=""
+    while IFS= read -r line; do
+        # Skip comments
+        [[ "$line" =~ ^# ]] && continue
+
+        # Parse the line
+        IFS='|' read -r namespace name path type remote checksum created access metadata <<< "$line"
+
+        # Keep if the path exists and is not a temp path
+        if [[ -d "$path" && "$metadata" != *"temp=true"* && "$path" != */tmp/* ]]; then
+            lines_to_keep+="$line\n"
+        else
+            trace "Pruning from manifest: $namespace/$name ($path)"
+        fi
+    done < "$manifest_file"
+
+    # Write the kept lines to the temp file
+    printf "%b" "$lines_to_keep" >> "$temp_file"
+
+    mv "$temp_file" "$manifest_file"
+    okay "✓ Manifest cleaned"
 }
 
 do_list() {
