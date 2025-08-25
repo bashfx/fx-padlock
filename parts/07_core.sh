@@ -21,6 +21,9 @@ dispatch() {
         key)
             do_key "$@"
             ;;
+        setup)
+            do_setup "$@"
+            ;;
         install)
             do_install "$@"
             ;;
@@ -47,6 +50,9 @@ dispatch() {
             ;;
         revoke)
             do_revoke "$@"
+            ;;
+        repair)
+            do_repair "$@"
             ;;
 
         export)
@@ -118,6 +124,7 @@ COMMANDS:
       --set-global <key>      Store global key
       --show-global           Display global key
       --generate-global       Create new global key
+      restore                 Restore master key from ignition backup
 
     install         Install padlock to your system for global access
     uninstall       Remove padlock from your system
@@ -136,6 +143,9 @@ COMMANDS:
 
     Advanced:
     overdrive       Engage overdrive mode (encrypts entire repo)
+    declamp         Remove padlock from a repository
+    revoke          Revoke encryption access (removes keys and forces re-key)
+    repair          Repair missing padlock artifacts from manifest
 
     help            Show this help
     version         Show version

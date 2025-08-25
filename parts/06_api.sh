@@ -85,9 +85,9 @@ do_clamp() {
     __print_gitignore "$REPO_ROOT/.gitignore"
     
     # Git configuration
-    git -C "$REPO_ROOT" config core.hooksPath .githooks
-    git -C "$REPO_ROOT" config filter.locker-crypt.clean 'bin/age-wrapper encrypt'
-    git -C "$REPO_ROOT" config filter.locker-crypt.smudge 'bin/age-wrapper decrypt'
+    git -C "$REPO_ROOT" config core.hooksPath .githooks 2>/dev/null || true
+    git -C "$REPO_ROOT" config filter.locker-crypt.clean 'bin/age-wrapper encrypt' 2>/dev/null || true
+    git -C "$REPO_ROOT" config filter.locker-crypt.smudge 'bin/age-wrapper decrypt' 2>/dev/null || true
     trace "Configured git filters"
     
     lock "🔑 Setting up encryption..."
@@ -509,8 +509,10 @@ _master_unlock() {
     # Check if the global key exists
     if [[ ! -f "$PADLOCK_GLOBAL_KEY" ]]; then
         error "Master key not found at: $PADLOCK_GLOBAL_KEY"
-        info "This key is usually generated automatically on first install."
-        info "Try running 'padlock install' to generate it."
+        info "Options to resolve this:"
+        info "  • Run 'padlock key --generate-global' to create a new master key"
+        info "  • Run 'padlock key restore' if you have an ignition backup"
+        info "  • Run 'padlock setup' for interactive setup"
         return 1
     fi
 
@@ -625,9 +627,19 @@ do_export() {
     local export_file="${1:-padlock_export_$(date +%Y%m%d_%H%M%S).tar.age}"
     local passphrase
 
-    # Prompt for a passphrase to secure the export
-    read -sp "Create a passphrase for the export file: " passphrase
-    echo
+    # Get passphrase from environment, file, or interactive prompt
+    if [[ -n "${PADLOCK_PASSPHRASE:-}" ]]; then
+        passphrase="$PADLOCK_PASSPHRASE"
+    elif [[ -n "${PADLOCK_PASSPHRASE_FILE:-}" ]] && [[ -f "$PADLOCK_PASSPHRASE_FILE" ]]; then
+        passphrase=$(cat "$PADLOCK_PASSPHRASE_FILE")
+    elif [[ -t 0 ]] && [[ -t 1 ]]; then
+        # Interactive mode
+        read -sp "Create a passphrase for the export file: " passphrase
+        echo
+    else
+        fatal "No passphrase provided. Set PADLOCK_PASSPHRASE environment variable or use PADLOCK_PASSPHRASE_FILE for automation."
+    fi
+
     if [[ -z "$passphrase" ]]; then
         fatal "Passphrase cannot be empty."
     fi
@@ -708,8 +720,18 @@ do_import() {
     fi
 
     if [[ -z "$passphrase" ]]; then
-        read -sp "Enter passphrase for import file: " passphrase
-        echo
+        # Get passphrase from environment, file, or interactive prompt
+        if [[ -n "${PADLOCK_PASSPHRASE:-}" ]]; then
+            passphrase="$PADLOCK_PASSPHRASE"
+        elif [[ -n "${PADLOCK_PASSPHRASE_FILE:-}" ]] && [[ -f "$PADLOCK_PASSPHRASE_FILE" ]]; then
+            passphrase=$(cat "$PADLOCK_PASSPHRASE_FILE")
+        elif [[ -t 0 ]] && [[ -t 1 ]]; then
+            read -sp "Enter passphrase for import file: " passphrase
+            echo
+        else
+            fatal "No passphrase provided. Set PADLOCK_PASSPHRASE environment variable or use PADLOCK_PASSPHRASE_FILE for automation."
+        fi
+        
         if [[ -z "$passphrase" ]]; then
             fatal "Passphrase cannot be empty."
         fi
@@ -859,6 +881,31 @@ do_install() {
     info "🗝️  Global master key configured"
 }
 
+do_uninstall() {
+    local install_dir="$XDG_LIB_HOME/fx/padlock"
+    local link_path="$XDG_BIN_HOME/fx/padlock"
+    
+    info "🗑️  Uninstalling padlock from system..."
+    
+    if [[ -L "$link_path" ]]; then
+        rm "$link_path"
+        info "✓ Removed symlink: $link_path"
+    fi
+    
+    if [[ -d "$install_dir" ]]; then
+        rm -rf "$install_dir"
+        info "✓ Removed installation: $install_dir"
+    fi
+    
+    if [[ ! -L "$link_path" ]] && [[ ! -d "$install_dir" ]]; then
+        warn "⚠️  Padlock was not installed or already removed"
+        return 0
+    fi
+    
+    okay "✓ Padlock uninstalled successfully"
+    info "💡 Keys and repositories remain in ~/.local/etc/padlock/"
+}
+
 _overdrive_unlock() {
     REPO_ROOT=$(_get_repo_root .)
 
@@ -961,13 +1008,11 @@ _overdrive_lock() {
     super_checksum=$(_calculate_locker_checksum "$super_chest")
 
     tar --sort=name --mtime='@0' --owner=0 --group=0 --numeric-owner \
-
         -C "$super_chest" -czf - . | __encrypt_stream > "$REPO_ROOT/super_chest.age"
 
     # Remove everything except padlock infrastructure and super_chest.age
     find "$REPO_ROOT" -maxdepth 1 -mindepth 1 \
         ! -name ".super_chest" \
-
         ! -name "bin" \
         ! -name ".chest" \
         ! -name ".git" \
@@ -1079,6 +1124,9 @@ do_key() {
             okay "✓ Added recipient: ${recipient:0:20}..."
             info "Re-encrypt with: padlock lock"
             ;;
+        restore)
+            _restore_master_key
+            ;;
         *)
             error "Unknown key action: $action"
             info "Available actions:"
@@ -1086,9 +1134,187 @@ do_key() {
             info "  --show-global          Display global public key"
             info "  --generate-global      Generate new global key"
             info "  --add-recipient <key>  Add recipient to current repo"
+            info "  restore               Restore master key from ignition backup"
             return 1
             ;;
     esac
+}
+
+do_setup() {
+    info "🔧 Padlock Interactive Setup"
+    echo
+    
+    if [[ -f "$PADLOCK_GLOBAL_KEY" ]]; then
+        okay "✓ Master key already exists"
+        info "Your padlock is already configured."
+        echo
+        info "Available commands:"
+        info "  padlock clamp <dir>    - Deploy to a new repository"
+        info "  padlock key restore    - Restore from ignition backup"
+        info "  padlock --help         - Show all commands"
+        return 0
+    fi
+    
+    echo "This will set up padlock encryption with a master key and ignition backup."
+    echo "The ignition backup allows you to recover your master key if lost."
+    echo
+    read -p "Proceed with setup? [Y/n]: " confirm
+    if [[ "$confirm" =~ ^[nN]$ ]]; then
+        info "Setup cancelled."
+        return 1
+    fi
+    
+    echo
+    info "🔑 Creating master key and ignition backup..."
+    _ensure_master_key
+    
+    echo
+    okay "✓ Setup complete!"
+    echo
+    info "Next steps:"
+    info "  1. Run 'padlock clamp <directory>' to secure a repository"
+    info "  2. Keep your master key safe: $PADLOCK_GLOBAL_KEY"
+    info "  3. Remember your ignition passphrase for emergency recovery"
+}
+
+do_repair() {
+    local repo_path="${1:-.}"
+    repo_path="$(realpath "$repo_path")"
+    
+    info "🔧 Padlock Repair Tool"
+    echo
+    
+    # Check if this looks like a padlock repository
+    if [[ ! -f "$repo_path/bin/padlock" ]]; then
+        error "No padlock installation found in: $repo_path"
+        info "This command repairs existing padlock repositories."
+        info "Use 'padlock clamp' to set up a new repository."
+        return 1
+    fi
+    
+    # Check if locker.age exists (encrypted state)
+    if [[ ! -f "$repo_path/locker.age" ]]; then
+        error "No locker.age found. Repository may not be properly clamped."
+        info "Expected to find encrypted locker data."
+        return 1
+    fi
+    
+    # Check what's missing and what can be repaired
+    local missing_items=()
+    local can_repair=false
+    
+    if [[ ! -f "$repo_path/locker/.padlock" ]]; then
+        if [[ -d "$repo_path/locker" ]]; then
+            missing_items+=(".padlock config file")
+            can_repair=true
+        else
+            info "Repository is currently locked. Unlocking first..."
+            if cd "$repo_path" && ./bin/padlock unlock; then
+                can_repair=true
+                missing_items+=(".padlock config file")
+            else
+                error "Cannot unlock repository. Repair cannot proceed."
+                info "Ensure you have the correct master key or try 'padlock key restore'"
+                return 1
+            fi
+        fi
+    fi
+    
+    if [[ ${#missing_items[@]} -eq 0 ]]; then
+        okay "✓ No missing artifacts detected"
+        info "Repository appears to be in good condition."
+        return 0
+    fi
+    
+    # Look up repository in manifest for repair information
+    local manifest_file="$PADLOCK_ETC/manifest.txt"
+    local manifest_entry=""
+    
+    if [[ -f "$manifest_file" ]]; then
+        manifest_entry=$(grep "|$repo_path|" "$manifest_file" 2>/dev/null || true)
+    fi
+    
+    if [[ -z "$manifest_entry" ]]; then
+        warn "⚠️  Repository not found in global manifest"
+        info "Attempting repair from available evidence..."
+    else
+        info "📋 Found manifest entry for this repository"
+        trace "Manifest: $manifest_entry"
+    fi
+    
+    # Repair missing .padlock file
+    if printf '%s\n' "${missing_items[@]}" | grep -q ".padlock config file"; then
+        info "🔧 Repairing .padlock configuration..."
+        
+        # Determine repository type and key configuration
+        local repo_type="standard"
+        local key_file=""
+        local recipients=""
+        
+        if [[ -n "$manifest_entry" ]]; then
+            repo_type=$(echo "$manifest_entry" | cut -d'|' -f4)
+        fi
+        
+        # Try to determine key configuration from existing setup
+        if [[ "$repo_type" == "ignition" ]]; then
+            # For ignition mode, we need to check if chest exists
+            if [[ -d "$repo_path/.chest" && -f "$repo_path/.chest/ignition.age" ]]; then
+                info "🔥 Detected ignition mode setup"
+                # This would require ignition key to decrypt, for now set up for master key access
+                key_file="$PADLOCK_GLOBAL_KEY"
+                recipients=$(age-keygen -y "$PADLOCK_GLOBAL_KEY" 2>/dev/null || echo "")
+            else
+                warn "Ignition setup incomplete, falling back to standard mode"
+                repo_type="standard"
+            fi
+        fi
+        
+        if [[ "$repo_type" == "standard" ]]; then
+            # Try to find repository-specific key
+            local repo_name
+            repo_name=$(basename "$repo_path")
+            local repo_key="$PADLOCK_KEYS/$repo_name.key"
+            
+            if [[ -f "$repo_key" ]]; then
+                key_file="$repo_key"
+                recipients=$(age-keygen -y "$repo_key" 2>/dev/null || echo "")
+                info "🔑 Using repository-specific key"
+            elif [[ -f "$PADLOCK_GLOBAL_KEY" ]]; then
+                key_file="$PADLOCK_GLOBAL_KEY"
+                recipients=$(age-keygen -y "$PADLOCK_GLOBAL_KEY" 2>/dev/null || echo "")
+                info "🔑 Using global master key"
+            else
+                error "No suitable key found for repair"
+                info "Options:"
+                info "  • Run 'padlock key --generate-global' to create master key"
+                info "  • Run 'padlock key restore' if you have ignition backup"
+                return 1
+            fi
+        fi
+        
+        if [[ -n "$recipients" ]]; then
+            # Set up environment for config generation
+            export AGE_RECIPIENTS="$recipients"
+            export AGE_KEY_FILE="$key_file"
+            export AGE_PASSPHRASE=""
+            export REPO_ROOT="$repo_path"
+            
+            # Generate new .padlock config
+            __print_padlock_config "$repo_path/locker/.padlock" "$(basename "$repo_path")"
+            
+            okay "✓ Regenerated .padlock configuration"
+            info "Key: $(basename "$key_file")"
+            info "Recipient: ${recipients:0:20}..."
+        else
+            error "Failed to determine encryption configuration"
+            return 1
+        fi
+    fi
+    
+    echo
+    okay "✓ Repair completed successfully"
+    info "Repository should now be functional."
+    info "Test with: padlock status"
 }
 
 # Safe declamp operation - remove padlock infrastructure while preserving data

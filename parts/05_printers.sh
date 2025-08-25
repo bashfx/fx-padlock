@@ -146,7 +146,7 @@ if [[ -d "$LOCKER_DIR" ]]; then
     echo "🔒 Auto-encrypting locker before commit..."
     if "$REPO_ROOT/bin/padlock" lock; then
         echo "✓ Locker encrypted successfully"
-        git add locker.age .locked 2>/dev/null || true
+        git add locker.age .locked .locker_checksum 2>/dev/null || true
     else
         echo "✗ Failed to encrypt locker" >&2
         exit 1

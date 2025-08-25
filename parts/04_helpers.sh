@@ -505,10 +505,125 @@ _ensure_master_key() {
         age-keygen -o "$PADLOCK_GLOBAL_KEY" >/dev/null
         chmod 600 "$PADLOCK_GLOBAL_KEY"
         okay "✓ Global master key created at: $PADLOCK_GLOBAL_KEY"
+        
+        # Create passphrase-encrypted ignition backup
+        _create_ignition_backup
+        
         warn "⚠️  This key is your ultimate backup. Keep it safe."
     else
         trace "Global master key already exists."
     fi
+}
+
+_create_ignition_backup() {
+    local ignition_backup="$PADLOCK_KEYS/ignition.age"
+    
+    # Skip if ignition backup already exists
+    if [[ -f "$ignition_backup" ]]; then
+        trace "Ignition backup already exists."
+        return 0
+    fi
+    
+    # Skip if not in interactive terminal (automated testing/CI)
+    if [[ ! -t 0 ]] || [[ ! -t 1 ]]; then
+        trace "Non-interactive environment detected, skipping ignition backup creation."
+        warn "⚠️  Ignition backup not created (non-interactive environment)"
+        info "💡 Run 'padlock setup' interactively to create ignition backup"
+        return 0
+    fi
+    
+    info "🔥 Creating ignition backup system..."
+    echo "Enter a memorable passphrase to encrypt your master key backup:"
+    echo "(This allows recovery if your master key file is lost)"
+    
+    local passphrase
+    local passphrase_confirm
+    
+    while true; do
+        read -s -p "Passphrase: " passphrase
+        echo
+        read -s -p "Confirm passphrase: " passphrase_confirm
+        echo
+        
+        if [[ "$passphrase" == "$passphrase_confirm" ]]; then
+            if [[ ${#passphrase} -lt 8 ]]; then
+                warn "Passphrase must be at least 8 characters. Please try again."
+                continue
+            fi
+            break
+        else
+            warn "Passphrases don't match. Please try again."
+        fi
+    done
+    
+    # Encrypt the master key with the passphrase
+    if AGE_PASSPHRASE="$passphrase" age -p < "$PADLOCK_GLOBAL_KEY" > "$ignition_backup"; then
+        chmod 600 "$ignition_backup"
+        okay "✓ Ignition backup created: $ignition_backup"
+        info "💡 To restore master key: padlock key restore"
+    else
+        error "Failed to create ignition backup"
+        rm -f "$ignition_backup"
+        return 1
+    fi
+    
+    # Clear passphrase from memory
+    unset passphrase passphrase_confirm
+}
+
+_restore_master_key() {
+    local ignition_backup="$PADLOCK_KEYS/ignition.age"
+    
+    if [[ ! -f "$ignition_backup" ]]; then
+        error "No ignition backup found at: $ignition_backup"
+        info "The ignition backup is created automatically during initial setup."
+        return 1
+    fi
+    
+    if [[ -f "$PADLOCK_GLOBAL_KEY" ]]; then
+        warn "Master key already exists at: $PADLOCK_GLOBAL_KEY"
+        echo "This will overwrite the existing master key."
+        read -p "Continue? [y/N]: " confirm
+        if [[ ! "$confirm" =~ ^[yY]$ ]]; then
+            info "Restore cancelled."
+            return 1
+        fi
+    fi
+    
+    info "🔥 Restoring master key from ignition backup..."
+    echo "Enter the passphrase used during setup:"
+    
+    local passphrase
+    read -s -p "Passphrase: " passphrase
+    echo
+    
+    # Try to decrypt the ignition backup
+    local temp_key
+    temp_key=$(mktemp)
+    trap "rm -f '$temp_key'" EXIT
+    
+    if AGE_PASSPHRASE="$passphrase" age -d < "$ignition_backup" > "$temp_key" 2>/dev/null; then
+        # Verify it's a valid age key
+        if age-keygen -y "$temp_key" >/dev/null 2>&1; then
+            mkdir -p "$(dirname "$PADLOCK_GLOBAL_KEY")"
+            mv "$temp_key" "$PADLOCK_GLOBAL_KEY"
+            chmod 600 "$PADLOCK_GLOBAL_KEY"
+            okay "✓ Master key restored successfully"
+            info "Your padlock repositories should now be accessible."
+        else
+            error "Restored file is not a valid age key"
+            rm -f "$temp_key"
+            return 1
+        fi
+    else
+        error "Failed to decrypt ignition backup"
+        info "Please check your passphrase and try again."
+        rm -f "$temp_key"
+        return 1
+    fi
+    
+    # Clear passphrase from memory
+    unset passphrase
 }
 
 __print_padlock_config() {

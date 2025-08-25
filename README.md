@@ -1,12 +1,15 @@
 # Padlock - Git Repository Security Orchestrator
 
-> **Modern age-based encryption for git repositories with seamless AI collaboration**
+> **Modern age-based encryption for git repositories with robust backup and recovery**
 
 Padlock transforms any git repository into a secure vault using the "locker pattern" - providing complete opacity to repository scrapers while maintaining a transparent developer experience.
 
 ## 🚀 **Quick Start**
 
 ```bash
+# Interactive setup with master key backup
+padlock setup
+
 # Deploy padlock to any git repository
 padlock clamp /my/repo --generate
 
@@ -14,11 +17,11 @@ padlock clamp /my/repo --generate
 echo "SECRET_API_KEY=abc123" > locker/conf_sec/.env
 echo "Internal docs" > locker/docs_sec/notes.md
 
-# Commit (auto-encrypts)
+# Commit (auto-encrypts with checksum)
 git add . && git commit -m "Add secrets"
 
 # Unlock after checkout
-source .locked
+padlock unlock
 ```
 
 ## 🔑 **Core Features**
@@ -28,114 +31,124 @@ source .locked
 - **Complete opacity**: Single encrypted blob reveals nothing about contents
 - **Team-friendly**: Simple public key sharing without GPG complexity
 - **Self-contained**: Each repo becomes autonomous
+- **Integrity verification**: MD5 checksums ensure content integrity
 
-### **🚀 Ignition Key System** *(TBD)*
-Revolutionary two-stage encryption perfect for AI collaboration:
+### **✅ Ignition Backup System**
+Passphrase-encrypted master key backup for disaster recovery:
 
 ```bash
-# Deploy with ignition key for AI sharing
-padlock clamp /my/repo -K "flame-rocket-boost-spark"
+# Setup creates both master key and ignition backup
+padlock setup
+# Enter passphrase: ********
 
-# Share just the ignition phrase with AI assistants
-# AI can unlock with: export PADLOCK_IGNITION_PASS="flame-rocket-boost-spark"
+# If master key is lost, restore from ignition backup
+padlock key restore
+# Enter the passphrase you created during setup
 ```
 
 **Benefits**:
-- **AI-friendly**: Share passphrase instead of private keys
-- **Instant revocation**: Change ignition key to revoke all access
-- **Two-stage security**: Personal key → Ignition key → Content
+- **Disaster recovery**: Never lose access to your repositories
+- **Passphrase-based**: Easy to remember, hard to crack
+- **Automatic creation**: Set up during initial configuration
+- **Secure storage**: Passphrase-encrypted backup of master key
 
-### **🗃️ .chest Directory Management** *(TBD)*
-Clean state management eliminating root directory clutter:
+### **✅ Repository Repair System**
+Intelligent repair for corrupted or incomplete padlock installations:
 
 ```bash
-# LOCKED state: Only .chest/ exists
-my-repo/
-├── .chest/               # All encrypted artifacts
-│   ├── locker.age       # Main content
-│   └── ignition.age     # Ignition key
-└── bin/padlock          # Tools
+# Repair missing .padlock configuration files
+padlock repair
 
-# UNLOCKED state: Only locker/ exists  
-my-repo/
-├── locker/              # Working directory
-│   ├── docs_sec/       # Plaintext for editing
-│   └── conf_sec/       # API keys, configs
-└── bin/padlock         # Tools
+# Automatically detects and fixes:
+# - Missing .padlock files
+# - Incorrect key configurations  
+# - Uses manifest and available evidence
 ```
 
-**Never both simultaneously** - impossible inconsistent states!
-
-### **📋 Enhanced Manifest System** *(TBD)*
+### **✅ Enhanced Manifest System**
 Rich repository tracking with namespace organization:
 
 ```bash
-# Advanced manifest format
+# Advanced manifest format tracks all repositories
 # namespace|name|path|type|remote|checksum|created|last_access|metadata
-github|myproject|/home/user/myproject|ignition|git@github.com:user/myproject.git|a1b2c3|2025-01-15T10:30:00Z|2025-01-15T14:20:00Z|
-local|secrets|/home/user/secrets|standard||f6e5d4|2025-01-15T11:45:00Z|2025-01-15T15:10:00Z|
-
-# List repositories by namespace
-padlock list --namespace github
-padlock list --ignition
+padlock list                      # Show all repositories
+padlock list --namespace github   # Filter by namespace
+padlock clean-manifest            # Remove stale entries
 ```
 
-### **🔐 Integrity Verification** *(TBD)*
-MD5 checksums ensure locker content integrity:
+### **✅ Robust Testing Suite**
+Comprehensive validation with ceremonious presentation:
 
 ```bash
-# Automatic verification during unlock
-source .locked
-# ✓ Locker integrity verified: a1b2c3d4...
-# ⚠️ Warning: Locker contents may have been modified
+# Run full test suite
+./test_runner.sh
+
+# Tests include:
+# - Build verification
+# - Command validation  
+# - E2E workflows (git & gitsim)
+# - Repair functionality
+# - Ignition backup system
+# - Overdrive mode
+```
+
+### **🚧 Overdrive Mode** *(Partial)*
+Full repository encryption for maximum security:
+
+```bash
+# Encrypt entire repository into traveling blob
+padlock overdrive lock            # → super_chest.age
+source .overdrive                 # Restore full repository
 ```
 
 ## 🎯 **Command Reference**
 
+### **Setup & Management**
+```bash
+padlock setup                     # Interactive first-time setup
+padlock status                    # Show current repository state
+padlock repair                    # Fix missing/corrupted files
+```
+
 ### **Deployment**
 ```bash
 padlock clamp <path>              # Deploy to repository
-  --generate                      # Generate new key
-  --global-key                    # Use global key
-  -K, --ignition [phrase]         # Enable ignition system (TBD)
+  --generate                      # Generate new repo-specific key
+  --global-key                    # Use global master key
+  -K, --ignition [phrase]         # Enable ignition system
 ```
 
 ### **Daily Operations**
 ```bash
-padlock status                    # Show lock/unlock state
 padlock lock                      # Encrypt locker/ → locker.age
 padlock unlock                    # Decrypt locker.age → locker/
-source .locked                    # Unlock and load environment
+padlock status                    # Show lock/unlock state
 ```
 
-### **Ignition System** *(TBD)*
+### **Key Management**
 ```bash
-padlock ignite --unlock           # Unlock .chest → locker/
-padlock ignite --lock             # Lock locker/ → .chest
-padlock rotate -K                 # Rotate ignition key
+padlock key --generate-global     # Create new global master key
+padlock key --show-global         # Display global public key
+padlock key --set-global <key>    # Set global master key
+padlock key restore               # Restore from ignition backup
+padlock key --add-recipient <key> # Add team member access
 ```
 
-### **Repository Management** *(TBD)*
+### **Repository Management**
 ```bash
 padlock list                      # Show managed repositories
 padlock list --namespace github   # Filter by namespace
 padlock clean-manifest            # Remove temp/stale entries
-padlock declamp [--force]         # Safely remove padlock (preserve content)
+padlock declamp [--force]         # Safely remove padlock
+padlock revoke                    # Revoke encryption access
 ```
 
-### **Backup & Migration** *(TBD)*
+### **Backup & Migration**
 ```bash
 padlock export backup.tar.age     # Export environment with all keys
 padlock import backup.tar.age     # Import on new system
 padlock snapshot before-changes   # Create named snapshot
 padlock rewind before-changes     # Restore from snapshot
-```
-
-### **Advanced Features** *(TBD)*
-```bash
-# Overdrive: Encrypt entire repository 
-padlock overdrive lock            # → Complete "traveling blob"
-source .overdrive                 # Restore full repository
 ```
 
 ## 🔧 **Installation**
@@ -147,51 +160,34 @@ source .overdrive                 # Restore full repository
 
 ### **Install Methods**
 ```bash
-# Package managers (preferred)
+# Package managers (for age dependency)
 apt install age          # Debian/Ubuntu
 brew install age         # macOS
 pacman -S age           # Arch
 
 # Global installation
-padlock install         # Installs to ~/.local/bin/fx/
+padlock install         # Installs to ~/.local/bin/
 ```
 
 ## 🔒 **Security Model**
 
 ### **What's Protected**
 - ✅ **File contents**: Modern age encryption
-- ✅ **Directory structure**: Hidden in single blob
+- ✅ **Directory structure**: Hidden in single blob  
 - ✅ **File metadata**: Sizes, counts, timestamps obscured
 - ✅ **Access patterns**: No indication of secret types
+- ✅ **Master key backup**: Passphrase-encrypted ignition system
 
 ### **What's Visible**
 - ⚠️ **Presence**: That encrypted content exists
 - ⚠️ **Size**: Approximate size of encrypted bundle
 - ⚠️ **Tool usage**: That padlock is in use
 
-### **Threat Model**
-- **✅ Protects against**: Repository scrapers, casual browsing, bot harvesting
-- **✅ Suitable for**: Commercial IP, LLM prompts, API keys, internal docs
-- **❌ Not suitable for**: Nation-state threats, formal compliance requirements
-
-## 🤖 **AI Collaboration Workflows**
-
-### **Standard Approach**
-```bash
-# Add AI assistant as recipient
-padlock key --add-recipient age1abc123...
-# Share private key securely with AI
-```
-
-### **Ignition Approach** *(TBD)*
-```bash
-# Deploy with ignition key
-padlock clamp /ai-project -K "shared-access-phrase"
-
-# Share just the phrase with AI
-export PADLOCK_IGNITION_PASS="shared-access-phrase"
-source .locked  # AI can now access everything
-```
+### **Recovery Options**
+- ✅ **Master key file**: Primary access method
+- ✅ **Ignition backup**: Passphrase-encrypted recovery
+- ✅ **Repository repair**: Reconstruct from manifest
+- ✅ **Export/import**: Full environment backup
 
 ## 📁 **Directory Structure**
 
@@ -199,25 +195,24 @@ source .locked  # AI can now access everything
 ```
 my-repo/
 ├── locker/              # Plaintext (unlocked) or absent (locked)
-│   ├── docs_sec/       # Secure documentation
+│   ├── docs_sec/       # Secure documentation  
 │   ├── conf_sec/       # API keys, configs
 │   └── .padlock        # Crypto configuration
 ├── locker.age          # Encrypted blob (locked) or absent (unlocked)
-├── .locked             # Unlock script (when locked)
+├── .locked             # Lock status indicator
+├── .locker_checksum    # Integrity verification
 ├── bin/padlock         # Self-contained tools
-└── SECURITY.md         # Usage guide (optional)
+└── .githooks/          # Automatic encryption hooks
 ```
 
-### **Ignition Mode** *(TBD)*
+### **Global Configuration**
 ```
-my-repo/
-├── .chest/             # Encrypted storage (locked state)
-│   ├── locker.age     # Main content
-│   └── ignition.age   # Encrypted ignition key
-├── locker/            # Working directory (unlocked state)
-├── .ignition.key      # Temporary (during active use)
-├── .overdrive         # Overdrive unlock script
-└── bin/padlock        # Tools
+~/.local/etc/padlock/
+├── keys/
+│   ├── global.key      # Master key (primary)
+│   ├── ignition.age    # Passphrase backup
+│   └── <repo>.key      # Repository-specific keys
+└── manifest.txt        # Repository tracking
 ```
 
 ## 🆚 **Comparison with Alternatives**
@@ -227,32 +222,37 @@ my-repo/
 | **Setup** | One command | Multi-step GPG | Manual workflow | Infrastructure |
 | **Encryption** | Age (modern) | GPG | GPG | Various |
 | **Transparency** | Automatic | Automatic | Manual | External |
-| **AI Collaboration** | ✅ Ignition keys | ❌ Complex | ❌ Manual | ⚠️ Depends |
+| **Backup/Recovery** | ✅ Multiple options | ❌ Manual | ❌ Manual | ⚠️ Depends |
 | **Metadata Hiding** | ✅ Complete | ⚠️ Per-file | ⚠️ Per-file | N/A |
 | **Team Sharing** | ✅ Public keys | ⚠️ GPG web of trust | ⚠️ GPG keys | ✅ Policies |
+| **Repair Tools** | ✅ Automatic | ❌ Manual | ❌ Manual | ⚠️ Depends |
 
-## 🛣️ **Roadmap**
+## 🛣️ **Implementation Status**
 
 ### **✅ Completed**
 - Core locker encryption with age
-- Git integration (hooks, filters)
-- Team collaboration via public keys
-- Comprehensive test suite
-- BASHFX-compliant architecture
+- Git integration (hooks, filters, checksum)
+- Master key and ignition backup system
+- Repository repair and recovery tools
+- Interactive setup and key management
+- Enhanced manifest system with namespace tracking
+- Team collaboration via public key sharing
+- Comprehensive test suite with ceremonious presentation
+- Export/import for cross-system migration
+- Repository declamp and access revocation
 
-### **🚧 In Development** *(TBD)*
-- **Phase 1**: Enhanced manifest system with namespace tracking
-- **Phase 2**: .chest directory management
-- **Phase 3**: Ignition key system for AI collaboration
-- **Phase 4**: Integrity verification and safe declamp
-- **Phase 5**: Export/import for cross-system migration
-- **Phase 6**: Overdrive mode for complete repository encryption
+### **🚧 In Progress**
+- Overdrive mode (partial implementation, some edge cases)
+
+### **📋 Planned**
+- Web interface for repository management
+- Integration with CI/CD systems
+- Advanced backup strategies
 
 ## 📖 **Documentation**
 
-- **[FEATURES.md](docs/FEATURES.md)**: Complete feature roadmap with implementation details
-- **[ANALYSIS.md](docs/ANALYSIS.md)**: Technical architecture and design philosophy
-- **[SESSION3.md](docs/SESSION3.md)**: Latest development session summary
+- **[FEATURES.md](FEATURES.md)**: Complete feature reference with examples
+- **[TODO.md](TODO.md)**: Current development priorities  
 - **SECURITY.md**: Generated in each repository after deployment
 
 ## 🤝 **Contributing**
@@ -263,11 +263,12 @@ Padlock follows the BASHFX framework for maintainable bash development:
 # Build from modular parts
 ./build.sh
 
-# Run comprehensive tests
+# Run comprehensive tests  
 ./test_runner.sh
 
 # Development workflow
-source bin/dev.sh
+func ls parts/06_api.sh           # List functions
+func spy do_setup parts/06_api.sh # Examine function
 ```
 
 ## 📄 **License**
@@ -276,6 +277,4 @@ GPL v3+ - See LICENSE file for details.
 
 ---
 
-**Padlock represents a modern approach to repository security that prioritizes developer experience while providing robust protection for sensitive content. Its transparent workflow and team-friendly architecture make it ideal for protecting commercial IP, LLM prompts, and confidential configuration in git repositories.**
-
-*Features marked (TBD) are designed and documented but not yet implemented.*
+**Padlock represents a modern approach to repository security that prioritizes developer experience while providing robust protection and recovery options for sensitive content. Its transparent workflow, comprehensive backup system, and intelligent repair capabilities make it ideal for protecting commercial IP, configuration secrets, and confidential documentation in git repositories.**
