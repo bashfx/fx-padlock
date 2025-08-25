@@ -260,7 +260,6 @@ do_lock() {
         # Calculate checksum
         local checksum
         checksum=$(find locker -type f -exec md5sum {} \; 2>/dev/null | sort | md5sum | cut -d' ' -f1)
-
         # Create a simple state file to indicate locked status
         touch .locked
 
@@ -333,7 +332,74 @@ do_unlock() {
 
     else
         fatal "Failed to decrypt locker.age. Check your key permissions or repository state."
+
     fi
+}
+
+do_list() {
+    local filter="$1"
+    local manifest_file="$PADLOCK_ETC/manifest.txt"
+
+    if [[ ! -f "$manifest_file" || ! -s "$manifest_file" ]]; then
+        info "Manifest is empty or not found. No repositories tracked yet."
+        return
+
+    fi
+
+    case "$filter" in
+        --all)
+            awk -F'|' '!/^#/ { printf "%-15s %-20s %s (%s)\n", $1, $2, $3, $4 }' "$manifest_file"
+            ;;
+        --ignition)
+            awk -F'|' '!/^#/ && $4 == "ignition" && $9 !~ /temp=true/ { printf "%-15s %-20s %s\n", $1, $2, $3 }' "$manifest_file"
+            ;;
+        --namespace)
+            local ns="$2"
+            awk -F'|' -v namespace="$ns" '!/^#/ && $1 == namespace && $9 !~ /temp=true/ { printf "%-20s %s (%s)\n", $2, $3, $4 }' "$manifest_file"
+            ;;
+        *)
+            # Default: exclude temp directories, show namespace/name/path
+            awk -F'|' '!/^#/ && $9 !~ /temp=true/ && $3 !~ /\/tmp\// { printf "%-15s %-20s %s (%s)\n", $1, $2, $3, $4 }' "$manifest_file"
+            ;;
+    esac
+}
+
+do_clean_manifest() {
+    local manifest_file="$PADLOCK_ETC/manifest.txt"
+
+    if [[ ! -f "$manifest_file" || ! -s "$manifest_file" ]]; then
+        info "Manifest is empty or not found. Nothing to clean."
+        return
+    fi
+
+    local temp_file
+    temp_file=$(mktemp)
+
+    # Preserve header
+    grep "^#" "$manifest_file" > "$temp_file"
+
+    # Use a temporary variable to store the lines to keep
+    local lines_to_keep=""
+    while IFS= read -r line; do
+        # Skip comments
+        [[ "$line" =~ ^# ]] && continue
+
+        # Parse the line
+        IFS='|' read -r namespace name path type remote checksum created access metadata <<< "$line"
+
+        # Keep if the path exists and is not a temp path
+        if [[ -d "$path" && "$metadata" != *"temp=true"* && "$path" != */tmp/* ]]; then
+            lines_to_keep+="$line\n"
+        else
+            trace "Pruning from manifest: $namespace/$name ($path)"
+        fi
+    done < "$manifest_file"
+
+    # Write the kept lines to the temp file
+    printf "%b" "$lines_to_keep" >> "$temp_file"
+
+    mv "$temp_file" "$manifest_file"
+    okay "✓ Manifest cleaned"
 }
 
 # Enhanced manifest management
@@ -341,59 +407,57 @@ _add_to_manifest() {
     local repo_path="$1"
     local repo_type="${2:-standard}"
     local manifest_file="$PADLOCK_ETC/manifest.txt"
-    local now=$(date -Iseconds 2>/dev/null || date)
+    local now
+    now=$(date -Iseconds 2>/dev/null || date)
     
-    # Create header if manifest is empty or missing
-    if [[ ! -f "$manifest_file" ]] || [[ ! -s "$manifest_file" ]]; then
-        cat > "$manifest_file" << 'EOF'
-# Padlock Repository Manifest
-# Format: namespace|name|path|type|remote|checksum|created|last_access|metadata
-EOF
+    # Create header if empty
+    if [[ ! -s "$manifest_file" ]]; then
+        echo "# Padlock Repository Manifest v2.0" > "$manifest_file"
+        echo "# Format: namespace|name|path|type|remote|checksum|created|last_access|metadata" >> "$manifest_file"
     fi
     
     # Extract repository information
-    local namespace="local"
     local repo_name
     repo_name=$(basename "$repo_path")
-    local git_remote=""
-    local repo_checksum
+    local namespace="local"
+    local remote_url=""
+    local checksum=""
     
-    # Try to get git remote for better organization
-    if git -C "$repo_path" remote get-url origin 2>/dev/null; then
-        git_remote=$(git -C "$repo_path" remote get-url origin 2>/dev/null)
-        if [[ "$git_remote" =~ github\.com ]]; then
-            namespace="github"
-        elif [[ "$git_remote" =~ gitlab\.com ]]; then
-            namespace="gitlab"
-        elif [[ "$git_remote" =~ bitbucket\.org ]]; then
-            namespace="bitbucket"
-        else
-            namespace="remote"
+    # Get git remote if available
+    if [[ -d "$repo_path/.git" ]]; then
+        remote_url=$(git -C "$repo_path" remote get-url origin 2>/dev/null || echo "")
+        if [[ -n "$remote_url" ]]; then
+            # Extract namespace and repo name from remote URL
+            if [[ "$remote_url" =~ github\.com[/:]([^/]+)/([^/]+) ]]; then
+                namespace="${BASH_REMATCH[1]}"
+                repo_name="${BASH_REMATCH[2]%.git}"
+            elif [[ "$remote_url" =~ gitlab\.com[/:]([^/]+)/([^/]+) ]]; then
+                namespace="${BASH_REMATCH[1]}"
+                repo_name="${BASH_REMATCH[2]%.git}"
+            else
+                namespace="remote"
+            fi
         fi
     fi
     
-    # Generate repository checksum for integrity
-    repo_checksum=$(echo "$repo_path$repo_type$now" | md5sum | cut -d' ' -f1)
+    # Generate repository checksum for integrity tracking
+    checksum=$(echo "$repo_path|$repo_type|$now" | sha256sum | cut -d' ' -f1 | head -c 12)
     
-    # Check if entry already exists
-    if grep -q "^[^#]*|[^|]*|$repo_path|" "$manifest_file" 2>/dev/null; then
-        # Update existing entry
-        local temp_file
-        temp_file=$(mktemp)
-        while IFS='|' read -r ns name path type remote checksum created access meta; do
-            if [[ "$path" == "$repo_path" ]]; then
-                echo "$namespace|$repo_name|$repo_path|$repo_type|$git_remote|$repo_checksum|$created|$now|updated=true"
-            else
-                echo "$ns|$name|$path|$type|$remote|$checksum|$created|$access|$meta"
-            fi
-        done < <(grep -v "^#" "$manifest_file") > "$temp_file"
-        mv "$temp_file" "$manifest_file"
-        trace "Updated manifest entry for $repo_path"
-    else
-        # Add new entry
-        echo "$namespace|$repo_name|$repo_path|$repo_type|$git_remote|$repo_checksum|$now|$now|new=true" >> "$manifest_file"
-        trace "Added manifest entry for $repo_path"
+    # Skip if path already exists in manifest
+    if grep -q "|$repo_path|" "$manifest_file" 2>/dev/null; then
+        trace "Manifest entry for $repo_path already exists. Skipping."
+        return 0
     fi
+
+    # Detect temp directories to add metadata
+    local metadata=""
+    if [[ "$repo_path" == */tmp/* ]] || [[ "$repo_path" == */temp/* ]]; then
+        metadata="temp=true"
+    fi
+
+    # Add new entry
+    echo "$namespace|$repo_name|$repo_path|$repo_type|$remote_url|$checksum|$now|$now|$metadata" >> "$manifest_file"
+    trace "Added manifest entry for $repo_path"
 }
 
 # Master unlock command

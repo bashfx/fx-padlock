@@ -402,6 +402,105 @@ run_master_unlock_test() {
     # The trap will handle cleanup
 }
 
+run_manifest_tests() {
+    echo
+    echo "=== Running Manifest Tests ==="
+    echo
+
+    # 1. Setup a fake XDG home
+    local fake_xdg_etc
+    fake_xdg_etc=$(mktemp -d)
+    export XDG_ETC_HOME="$fake_xdg_etc"
+    local manifest_file="$XDG_ETC_HOME/padlock/manifest.txt"
+    echo "--> Created fake XDG directory for manifest test: $fake_xdg_etc"
+
+    # 2. Setup a trap to clean up
+    # shellcheck disable=SC2064
+    trap "echo '--> Cleaning up temp directories...'; rm -rf '$fake_xdg_etc'" EXIT
+
+    # 3. Setup test repos
+    local original_dir
+    original_dir=$(pwd)
+
+    # Repo 1: Standard, local
+    local repo1_dir
+    repo1_dir=$(mktemp -d)
+    (cd "$repo1_dir" && git init -b main >/dev/null && "$original_dir/padlock.sh" -D clamp . --generate >/dev/null)
+    echo "--> Clamped standard local repo: $repo1_dir"
+
+    # Repo 2: Ignition, with github remote
+    local repo2_dir
+    repo2_dir=$(mktemp -d)
+    (cd "$repo2_dir" && git init -b main >/dev/null && git remote add origin git@github.com:testuser/test-repo.git && "$original_dir/padlock.sh" -D clamp . --ignition >/dev/null)
+    echo "--> Clamped ignition github repo: $repo2_dir"
+
+    # Repo 3: Temporary repo
+    local repo3_dir
+    repo3_dir=$(mktemp -d -p /tmp)
+    (cd "$repo3_dir" && git init -b main >/dev/null && "$original_dir/padlock.sh" -D clamp . >/dev/null)
+    echo "--> Clamped temporary repo: $repo3_dir"
+
+    # 4. Verify manifest content
+    echo "--> Verifying manifest format..."
+    if ! grep -q "local|$(basename "$repo1_dir")|$repo1_dir|standard|" "$manifest_file"; then
+        echo "ERROR: Standard local repo not found in manifest correctly."
+        exit 1
+    fi
+    if ! grep -q "testuser|test-repo|$repo2_dir|ignition|git@github.com:testuser/test-repo.git" "$manifest_file"; then
+        echo "ERROR: Ignition github repo not found in manifest correctly."
+        exit 1
+    fi
+    if ! grep -q "|temp=true" "$manifest_file"; then
+        echo "ERROR: Temporary repo not marked with metadata."
+        exit 1
+    fi
+    echo "OK"
+
+    # 5. Test 'padlock list'
+    echo "--> Testing 'padlock list' command..."
+    if [[ $("$original_dir/padlock.sh" list | wc -l) -ne 2 ]]; then
+        echo "ERROR: 'padlock list' should return 2 non-temp repos."
+        exit 1
+    fi
+    if ! ("$original_dir/padlock.sh" list --ignition | grep -q "test-repo"); then
+        echo "ERROR: 'padlock list --ignition' failed."
+        exit 1
+    fi
+    if ! ("$original_dir/padlock.sh" list --namespace testuser | grep -q "test-repo"); then
+        echo "ERROR: 'padlock list --namespace' failed."
+        exit 1
+    fi
+    if [[ $("$original_dir/padlock.sh" list --all | wc -l) -ne 3 ]]; then
+        echo "ERROR: 'padlock list --all' should return all 3 repos."
+        exit 1
+    fi
+    echo "OK"
+
+    # 6. Test 'padlock clean-manifest'
+    echo "--> Testing 'padlock clean-manifest'..."
+    # First, remove one of the "real" repos to simulate staleness
+    rm -rf "$repo1_dir"
+    "$original_dir/padlock.sh" clean-manifest > /dev/null
+    if [[ $("$original_dir/padlock.sh" list --all | wc -l) -ne 1 ]]; then
+        echo "ERROR: 'clean-manifest' did not prune stale and temp entries."
+        exit 1
+    fi
+    if ("$original_dir/padlock.sh" list --all | grep -q "$(basename "$repo1_dir")"); then
+        echo "ERROR: 'clean-manifest' did not remove stale repo."
+        exit 1
+    fi
+    if ("$original_dir/padlock.sh" list --all | grep -q "$(basename "$repo3_dir")"); then
+        echo "ERROR: 'clean-manifest' did not remove temp repo."
+        exit 1
+    fi
+    echo "OK"
+
+    # 7. Cleanup
+    rm -rf "$repo2_dir" "$repo3_dir"
+    unset XDG_ETC_HOME
+    cd "$original_dir"
+}
+
 # Run all tests
 run_e2e_test "git"
 run_e2e_test "gitsim"
@@ -409,6 +508,7 @@ run_ignition_test "git"
 run_ignition_test "gitsim"
 run_master_unlock_test
 run_install_tests
+run_manifest_tests
 
 echo
 echo "================================"

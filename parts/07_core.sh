@@ -36,6 +36,14 @@ dispatch() {
         rotate)
             do_rotate "$@"
             ;;
+
+        list)
+            do_list "$@"
+            ;;
+        clean-manifest)
+            do_clean_manifest "$@"
+            ;;
+
         help|--help|-h)
             usage
             ;;
@@ -91,6 +99,11 @@ COMMANDS:
 
     install         Install padlock to your system for global access
     uninstall       Remove padlock from your system
+
+    Manifest Management:
+    list [--all|--ignition|--namespace <ns>]
+                    List tracked repositories
+    clean-manifest  Prune stale entries from the manifest
 
     help            Show this help
     version         Show version
