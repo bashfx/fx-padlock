@@ -42,6 +42,7 @@ dispatch() {
         clean-manifest)
             do_clean_manifest "$@"
             ;;
+
         export)
             do_export "$@"
             ;;
@@ -54,9 +55,11 @@ dispatch() {
         rewind)
             do_rewind "$@"
             ;;
+
         overdrive)
             do_overdrive "$@"
             ;;
+
         help|--help|-h)
             usage
             ;;
@@ -124,8 +127,10 @@ COMMANDS:
     snapshot [name] Create a named backup snapshot of the current environment
     rewind <name>   Restore the environment from a named snapshot
 
+
     Advanced:
     overdrive       Engage overdrive mode (encrypts entire repo)
+
 
     help            Show this help
     version         Show version

@@ -227,9 +227,11 @@ run_ignition_test "git"
 run_ignition_test "gitsim"
 run_master_unlock_test
 run_install_tests
+
 run_manifest_tests
 run_integrity_check_test
 run_overdrive_tests
+
 
 echo
 echo "================================"
