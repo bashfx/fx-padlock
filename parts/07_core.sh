@@ -42,6 +42,20 @@ dispatch() {
         clean-manifest)
             do_clean_manifest "$@"
             ;;
+
+        export)
+            do_export "$@"
+            ;;
+        import)
+            do_import "$@"
+            ;;
+        snapshot)
+            do_snapshot "$@"
+            ;;
+        rewind)
+            do_rewind "$@"
+            ;;
+
         help|--help|-h)
             usage
             ;;
@@ -102,6 +116,14 @@ COMMANDS:
     list [--all|--ignition|--namespace <ns>]
                     List tracked repositories
     clean-manifest  Prune stale entries from the manifest
+
+
+    Backup and Restore:
+    export [file]   Export entire padlock environment to an encrypted file
+    import <file>   Import an environment from an export file
+    snapshot [name] Create a named backup snapshot of the current environment
+    rewind <name>   Restore the environment from a named snapshot
+
 
     help            Show this help
     version         Show version

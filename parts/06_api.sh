@@ -261,7 +261,6 @@ do_lock() {
         local checksum
         checksum=$(find locker -type f -exec md5sum {} \; 2>/dev/null | sort | md5sum | cut -d' ' -f1)
 
-
         # Calculate checksum of the original content and save it
         local checksum
         checksum=$(_calculate_locker_checksum "locker")
@@ -357,6 +356,71 @@ do_unlock() {
     else
         fatal "Failed to decrypt locker.age. Check your key permissions or repository state."
 
+    fi
+
+    local temp_file
+    temp_file=$(mktemp)
+
+    # Preserve header
+    grep "^#" "$manifest_file" > "$temp_file"
+
+    # Use a temporary variable to store the lines to keep
+    local lines_to_keep=""
+    while IFS= read -r line; do
+        # Skip comments
+        [[ "$line" =~ ^# ]] && continue
+
+        # Parse the line
+        IFS='|' read -r namespace name path type remote checksum created access metadata <<< "$line"
+
+        # Keep if the path exists and is not a temp path
+        if [[ -d "$path" && "$metadata" != *"temp=true"* && "$path" != */tmp/* ]]; then
+            lines_to_keep+="$line\n"
+        else
+            trace "Pruning from manifest: $namespace/$name ($path)"
+        fi
+    done < "$manifest_file"
+
+    # Write the kept lines to the temp file
+    printf "%b" "$lines_to_keep" >> "$temp_file"
+
+    mv "$temp_file" "$manifest_file"
+    okay "✓ Manifest cleaned"
+}
+
+do_list() {
+    local filter="$1"
+    local manifest_file="$PADLOCK_ETC/manifest.txt"
+
+    if [[ ! -f "$manifest_file" || ! -s "$manifest_file" ]]; then
+        info "Manifest is empty or not found. No repositories tracked yet."
+        return
+    fi
+
+    case "$filter" in
+        --all)
+            awk -F'|' '!/^#/ { printf "%-15s %-20s %s (%s)\n", $1, $2, $3, $4 }' "$manifest_file"
+            ;;
+        --ignition)
+            awk -F'|' '!/^#/ && $4 == "ignition" && $9 !~ /temp=true/ { printf "%-15s %-20s %s\n", $1, $2, $3 }' "$manifest_file"
+            ;;
+        --namespace)
+            local ns="$2"
+            awk -F'|' -v namespace="$ns" '!/^#/ && $1 == namespace && $9 !~ /temp=true/ { printf "%-20s %s (%s)\n", $2, $3, $4 }' "$manifest_file"
+            ;;
+        *)
+            # Default: exclude temp directories, show namespace/name/path
+            awk -F'|' '!/^#/ && $9 !~ /temp=true/ && $3 !~ /\/tmp\// { printf "%-15s %-20s %s (%s)\n", $1, $2, $3, $4 }' "$manifest_file"
+            ;;
+    esac
+}
+
+do_clean_manifest() {
+    local manifest_file="$PADLOCK_ETC/manifest.txt"
+
+    if [[ ! -f "$manifest_file" || ! -s "$manifest_file" ]]; then
+        info "Manifest is empty or not found. Nothing to clean."
+        return
     fi
 
     local temp_file
@@ -638,6 +702,215 @@ do_rotate() {
             ;;
     esac
 }
+
+
+do_export() {
+    local export_file="${1:-padlock_export_$(date +%Y%m%d_%H%M%S).tar.age}"
+    local passphrase
+
+    # Prompt for a passphrase to secure the export
+    read -sp "Create a passphrase for the export file: " passphrase
+    echo
+    if [[ -z "$passphrase" ]]; then
+        fatal "Passphrase cannot be empty."
+    fi
+
+    # Check if there is anything to export
+    if [[ ! -d "$PADLOCK_KEYS" || -z "$(ls -A "$PADLOCK_KEYS")" ]]; then
+        error "No keys found to export."
+        return 1
+    fi
+    if [[ ! -f "$PADLOCK_ETC/manifest.txt" ]]; then
+        error "Manifest not found. Nothing to export."
+        return 1
+    fi
+
+    info "📦 Exporting padlock environment..."
+
+    local temp_dir
+    temp_dir=$(mktemp -d)
+    trap 'rm -rf "$temp_dir"' RETURN
+
+    local export_manifest="$temp_dir/manifest.txt"
+    local keys_dir="$temp_dir/keys"
+
+    # Copy manifest and keys to a temporary location
+    cp "$PADLOCK_ETC/manifest.txt" "$export_manifest"
+    cp -r "$PADLOCK_KEYS" "$keys_dir"
+
+    # Create metadata file
+    cat > "$temp_dir/export_info.json" << EOF
+{
+    "version": "1.0",
+    "exported_at": "$(date -Iseconds)",
+    "exported_by": "$(whoami)@$(hostname)",
+    "padlock_version": "$PADLOCK_VERSION"
+}
+EOF
+
+    # Create a tarball and encrypt it with the passphrase
+    tar -C "$temp_dir" -czf - . | AGE_PASSPHRASE="$passphrase" age -p > "$export_file"
+    if [[ $? -ne 0 ]]; then
+        fatal "Failed to create encrypted export file."
+    fi
+
+    okay "✓ Padlock environment successfully exported to: $export_file"
+    warn "⚠️  Keep this file and your passphrase safe!"
+}
+
+_merge_manifests() {
+    local import_manifest="$1"
+    local current_manifest="$2"
+    local temp_file
+    temp_file=$(mktemp)
+
+    # Preserve header from current manifest if it exists
+    if [[ -f "$current_manifest" ]]; then
+        grep "^#" "$current_manifest" > "$temp_file"
+    else
+        # Or take header from import file
+        grep "^#" "$import_manifest" > "$temp_file"
+    fi
+
+    # Merge entries (avoid duplicates by checking path column, which is column 3)
+    {
+        grep -v "^#" "$current_manifest" 2>/dev/null || true
+        grep -v "^#" "$import_manifest"
+    } | sort -t'|' -k3,3 -u >> "$temp_file"
+
+    mv "$temp_file" "$current_manifest"
+}
+
+do_import() {
+    local import_file="$1"
+    local merge_mode="${2:---merge}"
+    local passphrase="${3:-}" # Accept passphrase as 3rd arg
+
+    if [[ ! -f "$import_file" ]]; then
+        fatal "Import file not found: $import_file"
+    fi
+
+    if [[ -z "$passphrase" ]]; then
+        read -sp "Enter passphrase for import file: " passphrase
+        echo
+        if [[ -z "$passphrase" ]]; then
+            fatal "Passphrase cannot be empty."
+        fi
+    fi
+
+    local temp_dir
+    temp_dir=$(mktemp -d)
+    trap 'rm -rf "$temp_dir"' RETURN
+
+    # Decrypt and extract
+    if ! AGE_PASSPHRASE="$passphrase" age -d < "$import_file" | tar -C "$temp_dir" -xzf -; then
+        fatal "Failed to decrypt import file (wrong passphrase?)"
+    fi
+
+    # Validate import
+    if [[ ! -f "$temp_dir/export_info.json" || ! -f "$temp_dir/manifest.txt" ]]; then
+        fatal "Invalid padlock export file."
+    fi
+
+    info "Successfully decrypted export file."
+
+    # Backup current state
+    local backup_dir="$PADLOCK_ETC/backup_$(date +%Y%m%d_%H%M%S)"
+    mkdir -p "$backup_dir"
+    if [[ -d "$PADLOCK_ETC" ]]; then
+        cp -a "$PADLOCK_ETC"/* "$backup_dir/" 2>/dev/null || true
+    fi
+    info "Current environment backed up to: $backup_dir"
+
+    # Import based on mode
+    case "$merge_mode" in
+        --replace)
+            warn "Replacing current padlock environment."
+            rm -f "$PADLOCK_ETC/manifest.txt"
+            rm -rf "$PADLOCK_KEYS"
+            mkdir -p "$PADLOCK_KEYS"
+            cp "$temp_dir/manifest.txt" "$PADLOCK_ETC/manifest.txt"
+            cp -r "$temp_dir/keys"/* "$PADLOCK_KEYS/"
+            ;;
+        --merge)
+            info "Merging with current environment."
+            _merge_manifests "$temp_dir/manifest.txt" "$PADLOCK_ETC/manifest.txt"
+            cp -rT "$temp_dir/keys" "$PADLOCK_KEYS" 2>/dev/null || true
+            ;;
+        *)
+            fatal "Unknown import mode: $merge_mode. Use --merge or --replace."
+            ;;
+    esac
+
+    okay "✓ Import completed successfully."
+}
+
+do_snapshot() {
+    local snapshot_name="${1:-auto_$(date +%Y%m%d_%H%M%S)}"
+    local snapshots_dir="$PADLOCK_ETC/snapshots"
+
+    mkdir -p "$snapshots_dir"
+
+    # Use a temporary, non-guessable passphrase for the snapshot export
+    local snapshot_pass
+    snapshot_pass=$(openssl rand -base64 32)
+
+    local export_file="$snapshots_dir/${snapshot_name}.tar.age"
+
+    info "Creating snapshot: $snapshot_name"
+
+    local temp_dir
+    temp_dir=$(mktemp -d)
+    trap 'rm -rf "$temp_dir"' RETURN
+
+    cp "$PADLOCK_ETC/manifest.txt" "$temp_dir/manifest.txt"
+    cp -r "$PADLOCK_KEYS" "$temp_dir/keys"
+
+    tar -C "$temp_dir" -czf - . | AGE_PASSPHRASE="$snapshot_pass" age -p > "$export_file"
+    if [[ $? -ne 0 ]]; then
+        fatal "Failed to create snapshot export file."
+    fi
+
+    # Create snapshot metadata, including the passphrase
+    cat > "$snapshots_dir/${snapshot_name}.info" << EOF
+name=$snapshot_name
+created=$(date -Iseconds)
+passphrase=$snapshot_pass
+repos=$(grep -cv "^#" "$PADLOCK_ETC/manifest.txt")
+keys=$(find "$PADLOCK_KEYS" -name "*.key" | wc -l)
+EOF
+
+    okay "✓ Snapshot created: $snapshot_name"
+}
+
+do_rewind() {
+    local snapshot_name="$1"
+    local snapshots_dir="$PADLOCK_ETC/snapshots"
+
+    if [[ ! -f "$snapshots_dir/${snapshot_name}.tar.age" || ! -f "$snapshots_dir/${snapshot_name}.info" ]]; then
+        error "Snapshot not found: $snapshot_name"
+        info "Available snapshots:"
+        ls -1 "$snapshots_dir"/*.info 2>/dev/null | sed 's/\.info$//' | xargs -I {} basename {} || echo " (none)"
+        return 1
+    fi
+
+    warn "This will ERASE your current padlock environment and restore the snapshot."
+    read -p "Type the snapshot name to confirm: '$snapshot_name': " confirm
+    if [[ "$confirm" != "$snapshot_name" ]]; then
+        info "Rewind cancelled."
+        return 0
+    fi
+
+    # Get the passphrase from the metadata file
+    local snapshot_pass
+    snapshot_pass=$(grep "^passphrase=" "$snapshots_dir/${snapshot_name}.info" | cut -d'=' -f2)
+
+    # Call do_import with the correct arguments for non-interactive restore
+    do_import "$snapshots_dir/${snapshot_name}.tar.age" --replace "$snapshot_pass"
+
+    okay "✓ Rewound to snapshot: $snapshot_name"
+}
+
 
 do_install() {
     local force="${1:-0}"
