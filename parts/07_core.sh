@@ -131,7 +131,6 @@ COMMANDS:
     Advanced:
     overdrive       Engage overdrive mode (encrypts entire repo)
 
-
     help            Show this help
     version         Show version
 

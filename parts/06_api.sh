@@ -358,45 +358,6 @@ do_unlock() {
 
     fi
 
-    local temp_file
-    temp_file=$(mktemp)
-
-    # Preserve header
-    grep "^#" "$manifest_file" > "$temp_file"
-
-    # Use a temporary variable to store the lines to keep
-    local lines_to_keep=""
-    while IFS= read -r line; do
-        # Skip comments
-        [[ "$line" =~ ^# ]] && continue
-
-        # Parse the line
-        IFS='|' read -r namespace name path type remote checksum created access metadata <<< "$line"
-
-        # Keep if the path exists and is not a temp path
-        if [[ -d "$path" && "$metadata" != *"temp=true"* && "$path" != */tmp/* ]]; then
-            lines_to_keep+="$line\n"
-        else
-            trace "Pruning from manifest: $namespace/$name ($path)"
-        fi
-    done < "$manifest_file"
-
-    # Write the kept lines to the temp file
-    printf "%b" "$lines_to_keep" >> "$temp_file"
-
-    mv "$temp_file" "$manifest_file"
-    okay "✓ Manifest cleaned"
-}
-
-do_list() {
-    local filter="$1"
-    local manifest_file="$PADLOCK_ETC/manifest.txt"
-
-    if [[ ! -f "$manifest_file" || ! -s "$manifest_file" ]]; then
-        info "Manifest is empty or not found. No repositories tracked yet."
-        return
-    fi
-
     case "$filter" in
         --all)
             awk -F'|' '!/^#/ { printf "%-15s %-20s %s (%s)\n", $1, $2, $3, $4 }' "$manifest_file"
@@ -593,6 +554,7 @@ _add_to_manifest() {
     
     # Create header if empty
     if [[ ! -s "$manifest_file" ]]; then
+        mkdir -p "$(dirname "$manifest_file")"
         echo "# Padlock Repository Manifest v2.0" > "$manifest_file"
         echo "# Format: namespace|name|path|type|remote|checksum|created|last_access|metadata" >> "$manifest_file"
     fi
@@ -628,7 +590,6 @@ _add_to_manifest() {
     if grep -q "|$repo_path|" "$manifest_file" 2>/dev/null; then
         trace "Manifest entry for $repo_path already exists. Skipping."
         return 0
-
     fi
 
     # Detect temp directories to add metadata
@@ -1087,31 +1048,23 @@ _overdrive_lock() {
     # Create super_chest directory for staging
     local super_chest="$REPO_ROOT/.super_chest"
     mkdir -p "$super_chest"
-    trap 'rm -rf "$super_chest"' RETURN
 
-    # Copy everything except padlock infrastructure
-    local exclude_patterns=(
-        "bin"
-        ".chest"
-        ".super_chest"
-        "super_chest.age"
-        ".locked"
-        ".ignition.key"
-        ".git"
-        ".gitsim"
-        ".locker_checksum"
-        "locker.age"
-    )
+    trap 'rm -rf "$super_chest"' EXIT
 
+    # Use tar to copy files, which is more reliable than rsync for this case
     info "Archiving entire repository..."
-
-    local exclude_file
-    exclude_file=$(mktemp)
-    printf "%s\n" "${exclude_patterns[@]}" > "$exclude_file"
-
-    rsync -a --exclude-from="$exclude_file" "$REPO_ROOT/" "$super_chest/" > /dev/null
-
-    rm -f "$exclude_file"
+    tar -c --exclude-from <(printf "%s\n" \
+        ".super_chest" \
+        "bin" \
+        ".chest" \
+        "super_chest.age" \
+        ".locked" \
+        ".ignition.key" \
+        ".git" \
+        ".gitsim" \
+        ".locker_checksum" \
+        "locker.age" \
+    ) -C "$REPO_ROOT" . | tar -x -C "$super_chest"
 
     source "$REPO_ROOT/locker/.padlock"
 
@@ -1119,10 +1072,13 @@ _overdrive_lock() {
     super_checksum=$(_calculate_locker_checksum "$super_chest")
 
     tar --sort=name --mtime='@0' --owner=0 --group=0 --numeric-owner \
-        -C "$REPO_ROOT" -czf - ".super_chest" | __encrypt_stream > "$REPO_ROOT/super_chest.age"
+
+        -C "$super_chest" -czf - . | __encrypt_stream > "$REPO_ROOT/super_chest.age"
 
     # Remove everything except padlock infrastructure and super_chest.age
     find "$REPO_ROOT" -maxdepth 1 -mindepth 1 \
+        ! -name ".super_chest" \
+
         ! -name "bin" \
         ! -name ".chest" \
         ! -name ".git" \
