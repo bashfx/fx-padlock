@@ -215,6 +215,21 @@ __decrypt_stream() {
     fi
 }
 
+_calculate_locker_checksum() {
+    local locker_dir="$1"
+
+    if [[ ! -d "$locker_dir" ]]; then
+        echo "no-locker"
+        return 0
+    fi
+
+    # Create a deterministic checksum of all files in the locker
+    find "$locker_dir" -type f -exec md5sum {} \; 2>/dev/null | \
+        sort -k2 | \
+        md5sum | \
+        cut -d' ' -f1
+}
+
 _validate_clamp_target() {
     local target_path="$1"
     if ! is_git_repo "$target_path"; then
@@ -298,7 +313,6 @@ _lock_chest() {
 
 # Wrapper for ignition unlock process
 _unlock_chest() {
-
     local encrypted_ignition_key_blob="$REPO_ROOT/.chest/ignition.age"
     local chest_blob="$REPO_ROOT/.chest/locker.age"
 
@@ -311,7 +325,6 @@ _unlock_chest() {
         error "Ignition key not found in environment variable PADLOCK_IGNITION_PASS."
         return 1
     fi
-
 
     info "🗃️  Unlocking locker from .chest using ignition passphrase..."
 
@@ -333,7 +346,6 @@ _unlock_chest() {
 
     if __decrypt_stream < "$chest_blob" | tar -xzf - -C "$REPO_ROOT"; then
         # Remove chest *after* successful decryption
-
         rm -rf "$REPO_ROOT/.chest"
         okay "✓ Chest unlocked. Encrypted chest removed."
         return 0
@@ -445,7 +457,6 @@ _ensure_master_key() {
     else
         trace "Global master key already exists."
     fi
-
 }
 
 __print_padlock_config() {

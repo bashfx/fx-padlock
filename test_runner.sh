@@ -501,6 +501,80 @@ run_manifest_tests() {
     cd "$original_dir"
 }
 
+run_integrity_check_test() {
+    echo
+    echo "=== Running Integrity Check Test ==="
+    echo
+
+    # 1. Create a temporary directory
+    local test_dir
+    test_dir=$(mktemp -d)
+    echo "--> Created temp directory for test: $test_dir"
+
+    # 2. Setup a trap to clean up the directory on exit
+    # shellcheck disable=SC2064
+    trap "echo '--> Cleaning up temp directory...'; rm -rf '$test_dir'" EXIT
+
+    # Store current directory and cd into test dir
+    local original_dir
+    original_dir=$(pwd)
+    cd "$test_dir"
+
+    # 3. Initialize a git repository and clamp
+    git init -b main > /dev/null
+    "$original_dir/padlock.sh" clamp . --generate > /dev/null
+    echo "--> Clamped new repo"
+
+    # 4. Create a secret and lock the repo
+    echo "secret" > locker/secret.txt
+    ./bin/padlock lock > /dev/null
+    echo "--> Locked repo, .locker_checksum should exist"
+
+    # 5. Verify checksum file exists
+    if [ ! -f ".locker_checksum" ]; then
+        echo "ERROR: lock command did not create .locker_checksum file"
+        exit 1
+    fi
+    local original_checksum
+    original_checksum=$(cat .locker_checksum)
+    if [ -z "$original_checksum" ]; then
+        echo "ERROR: .locker_checksum is empty"
+        exit 1
+    fi
+    echo "OK"
+
+    # 6. Unlock and verify success message
+    echo "--> Unlocking with correct checksum..."
+    local unlock_output
+    unlock_output=$("$original_dir/padlock.sh" -D unlock 2>&1)
+    if ! echo "$unlock_output" | grep -q "Locker integrity verified"; then
+        echo "ERROR: Integrity check did not pass on valid unlock"
+        echo "$unlock_output"
+        exit 1
+    fi
+    echo "OK"
+
+    # 7. Lock again
+    ./bin/padlock lock > /dev/null
+
+    # 8. Corrupt the checksum file
+    echo "corrupted" > .locker_checksum
+    echo "--> Corrupted .locker_checksum file"
+
+    # 9. Unlock again and verify warning
+    echo "--> Unlocking with corrupted checksum..."
+    unlock_output=$("$original_dir/padlock.sh" unlock 2>&1)
+    if ! echo "$unlock_output" | grep -q "Locker integrity check FAILED"; then
+        echo "ERROR: Integrity check did not warn on corrupted checksum"
+        echo "$unlock_output"
+        exit 1
+    fi
+    echo "OK"
+
+    # Return to original directory
+    cd "$original_dir"
+}
+
 # Run all tests
 run_e2e_test "git"
 run_e2e_test "gitsim"
@@ -509,6 +583,7 @@ run_ignition_test "gitsim"
 run_master_unlock_test
 run_install_tests
 run_manifest_tests
+run_integrity_check_test
 
 echo
 echo "================================"
