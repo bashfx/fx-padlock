@@ -955,10 +955,12 @@ __confirm_destructive() {
 *Priority: LOW - Advanced "traveling blob" feature*
 
 ### **Features**
-- ✅ Complete repository encryption (except padlock infrastructure)
-- ✅ Traveling blob for secure repo transport
-- ✅ Full project stasis with single encrypted artifact
-- ✅ Perfect for secure repo sharing/backup
+- ⚠️ Complete repository encryption (except padlock infrastructure) - **[BUG]**
+- ⚠️ Traveling blob for secure repo transport
+- ⚠️ Full project stasis with single encrypted artifact
+- ⚠️ Perfect for secure repo sharing/backup
+
+**NOTE:** This feature is currently disabled in tests due to a bug where the temporary `.super_chest` directory is deleted prematurely during the `overdrive lock` operation.
 
 ### **Concept**
 Instead of just encrypting `locker/`, **overdrive mode** encrypts the **entire repository** except padlock infrastructure:
@@ -1236,7 +1238,7 @@ dispatch() {
 }
 ```
 
-**Acceptance Criteria:**
+**Acceptance Criteria (WIP):**
 - [ ] `padlock overdrive lock` encrypts entire repository except infrastructure
 - [ ] `super_chest.age` contains complete project (code, docs, assets)
 - [ ] Only `bin/`, `.git/`, `.chest/` remain visible after overdrive

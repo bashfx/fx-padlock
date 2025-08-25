@@ -52,7 +52,10 @@ _get_repo_root() {
 
 _get_lock_state() {
     local repo_root="$1"
-    if is_locked "$repo_root"; then
+    # Prioritize chest state if it exists, as it's the more modern format.
+    if [[ -d "$repo_root/.chest" ]]; then
+        echo "locked"
+    elif is_locked "$repo_root"; then # Standard lock file
         echo "locked"
     elif is_unlocked "$repo_root"; then
         echo "unlocked"
@@ -206,10 +209,25 @@ __decrypt_stream() {
     if [[ -n "${AGE_KEY_FILE:-}" && -f "$AGE_KEY_FILE" ]]; then
         age -d -i "$AGE_KEY_FILE"
     elif [[ -n "${AGE_PASSPHRASE:-}" ]]; then
-        AGE_PASSPHRASE="$AGE_PASSPHRASE" age -d -p
+        AGE_PASSPHRASE="$AGE_PASSPHRASE" age -d
     else
         fatal "No decryption key available"
     fi
+}
+
+_calculate_locker_checksum() {
+    local locker_dir="$1"
+
+    if [[ ! -d "$locker_dir" ]]; then
+        echo "no-locker"
+        return 0
+    fi
+
+    # Create a deterministic checksum of all files in the locker
+    find "$locker_dir" -type f -exec md5sum {} \; 2>/dev/null | \
+        sort -k2 | \
+        md5sum | \
+        cut -d' ' -f1
 }
 
 _validate_clamp_target() {
@@ -230,15 +248,215 @@ _setup_crypto_with_master() {
     if [[ "$use_ignition" == "true" ]]; then
         AGE_PASSPHRASE="$ignition_key"
     else
-        AGE_RECIPIENTS=$(age-keygen -y "$key_file" 2>/dev/null)
+        # Ensure the global master key exists to be added as a recipient.
+        _ensure_master_key
+
+        # Get the public key of the repo-specific key.
+        local repo_recipient
+        repo_recipient=$(age-keygen -y "$key_file" 2>/dev/null)
+
+        # Get the public key of the global master key.
+        local master_recipient
+        master_recipient=$(age-keygen -y "$PADLOCK_GLOBAL_KEY" 2>/dev/null)
+
+        # Combine them. __encrypt_stream handles comma-separated lists.
+        AGE_RECIPIENTS="$repo_recipient,$master_recipient"
+        trace "Repo recipient: $repo_recipient"
+        trace "Master recipient: $master_recipient"
     fi
 
     __print_padlock_config "$LOCKER_CONFIG" "$(basename "$REPO_ROOT")"
 }
 
+# Guard function for chest mode
+is_chest_repo() {
+    [[ -d "$1/.chest" ]]
+}
+
+# State-getter for chest mode
+get_chest_state() {
+    if is_chest_repo "$REPO_ROOT"; then
+        echo "locked"
+    elif [[ -d "$REPO_ROOT/locker" ]]; then
+        echo "unlocked"
+    else
+        echo "unknown"
+    fi
+}
+
+# Wrapper for ignition lock process
+_lock_chest() {
+    if [[ ! -d "$REPO_ROOT/locker" ]]; then
+        error "Locker directory not found, cannot lock chest."
+        return 1
+    fi
+    info "🗃️  Securing locker in .chest..."
+
+    # Load config from inside the locker to get recipients/passphrase
+    source "$REPO_ROOT/locker/.padlock"
+
+    # Encrypt locker directly into the chest
+    local chest_blob="$REPO_ROOT/.chest/locker.age"
+    mkdir -p "$REPO_ROOT/.chest"
+    if tar -czf - -C "$REPO_ROOT" locker | __encrypt_stream > "$chest_blob"; then
+        # Remove plaintext locker *after* success
+        rm -rf "$REPO_ROOT/locker"
+        okay "✓ Chest locked. Plaintext locker removed."
+        return 0
+    else
+        error "Failed to encrypt locker into chest."
+        # Cleanup failed attempt
+        rm -f "$chest_blob"
+        return 1
+    fi
+}
+
+# Wrapper for ignition unlock process
+_unlock_chest() {
+    local encrypted_ignition_key_blob="$REPO_ROOT/.chest/ignition.age"
+    local chest_blob="$REPO_ROOT/.chest/locker.age"
+
+    if [[ ! -f "$encrypted_ignition_key_blob" || ! -f "$chest_blob" ]]; then
+        error "Chest is incomplete. Cannot unlock. Missing ignition.age or locker.age."
+        return 1
+    fi
+
+    if [[ -z "${PADLOCK_IGNITION_PASS:-}" ]]; then
+        error "Ignition key not found in environment variable PADLOCK_IGNITION_PASS."
+        return 1
+    fi
+
+    info "🗃️  Unlocking locker from .chest using ignition passphrase..."
+
+    # 1. Decrypt the ignition key into a temporary file.
+    local temp_ignition_key
+    temp_ignition_key=$(mktemp)
+    trap "trace 'Cleaning up temp key file...'; rm -f -- '$temp_ignition_key'" RETURN
+
+    AGE_PASSPHRASE="${PADLOCK_IGNITION_PASS}" age -d < "$encrypted_ignition_key_blob" > "$temp_ignition_key"
+    if [[ $? -ne 0 || ! -s "$temp_ignition_key" ]]; then
+        fatal "Failed to decrypt ignition key. Is the passphrase correct?"
+    fi
+    trace "Decrypted ignition key to temporary file."
+
+    # 2. Use the decrypted ignition key to decrypt the locker.
+    export AGE_KEY_FILE="$temp_ignition_key"
+    export AGE_RECIPIENTS=""
+    export AGE_PASSPHRASE=""
+
+    if __decrypt_stream < "$chest_blob" | tar -xzf - -C "$REPO_ROOT"; then
+        # Remove chest *after* successful decryption
+        rm -rf "$REPO_ROOT/.chest"
+        okay "✓ Chest unlocked. Encrypted chest removed."
+        return 0
+    else
+        error "Failed to decrypt locker from chest using ignition key."
+        rm -rf "$REPO_ROOT/locker"
+        return 1
+    fi
+}
+
 _generate_ignition_key() {
-    # Not implemented
-    echo "flame-rocket-boost-spark"
+    # Generate a memorable, 6-part passphrase from a curated wordlist.
+    local words=("flame" "rocket" "boost" "spark" "launch" "fire" "power" "thrust" "ignite" "blast" "nova" "comet" "star" "orbit" "galaxy" "nebula")
+    local key=""
+    for i in {1..6}; do
+        key+="${words[$RANDOM % ${#words[@]}]}"
+        [[ $i -lt 6 ]] && key+="-"
+    done
+    echo "$key"
+}
+
+_setup_ignition_system() {
+    local ignition_passphrase="${1}" # The memorable phrase
+
+    info "🔥 Setting up ignition system..."
+
+    # 1. Generate the repository's master keypair. This will be encrypted.
+    local ignition_key_file="$REPO_ROOT/.chest/ignition.key"
+    mkdir -p "$REPO_ROOT/.chest"
+    age-keygen -o "$ignition_key_file" >/dev/null
+    trace "Generated ignition keypair at $ignition_key_file"
+
+    # 2. Encrypt the new private key using the provided passphrase.
+    local encrypted_ignition_key_blob="$REPO_ROOT/.chest/ignition.age"
+    AGE_PASSPHRASE="$ignition_passphrase" age -p < "$ignition_key_file" > "$encrypted_ignition_key_blob"
+    if [[ $? -ne 0 ]]; then
+        fatal "Failed to encrypt ignition key with passphrase."
+    fi
+    trace "Encrypted ignition key stored at $encrypted_ignition_key_blob"
+
+    # 3. Get the public key of the new ignition key. This will be the recipient for the locker.
+    local ignition_public_key
+    ignition_public_key=$(age-keygen -y "$ignition_key_file")
+
+    # 4. Clean up the plaintext private key.
+    rm -f "$ignition_key_file"
+
+    # 5. Set up the .padlock config file for future `ignite --lock` operations.
+    export AGE_RECIPIENTS="$ignition_public_key"
+    export AGE_KEY_FILE=""
+    export AGE_PASSPHRASE=""
+    __print_padlock_config "$LOCKER_CONFIG" "$(basename "$REPO_ROOT")"
+
+    okay "✓ Ignition system configured."
+    info "🔑 Your ignition passphrase: $ignition_passphrase"
+    warn "⚠️  Share this passphrase for AI/automation access. Keep it safe."
+}
+
+_rotate_ignition_key() {
+    local encrypted_ignition_key_blob="$REPO_ROOT/.chest/ignition.age"
+    if [[ ! -f "$encrypted_ignition_key_blob" ]]; then
+        error "Cannot rotate ignition key: chest is not locked or not an ignition repo."
+        return 1
+    fi
+
+    # Prompt for the old passphrase
+    local old_passphrase
+    read -sp "Enter current ignition passphrase: " old_passphrase
+    echo
+
+    if [[ -z "$old_passphrase" ]]; then
+        error "No passphrase provided. Aborting."
+        return 1
+    fi
+
+    # Decrypt the key with the old passphrase
+    local temp_ignition_key
+    temp_ignition_key=$(mktemp)
+    trap "rm -f -- '$temp_ignition_key'" RETURN
+
+    AGE_PASSPHRASE="$old_passphrase" age -d < "$encrypted_ignition_key_blob" > "$temp_ignition_key"
+    if [[ $? -ne 0 || ! -s "$temp_ignition_key" ]]; then
+        fatal "Failed to decrypt ignition key. Is the passphrase correct?"
+    fi
+
+    # Generate a new passphrase
+    local new_passphrase
+    new_passphrase=$(_generate_ignition_key)
+
+    # Re-encrypt the key with the new passphrase
+    AGE_PASSPHRASE="$new_passphrase" age -p < "$temp_ignition_key" > "$encrypted_ignition_key_blob"
+    if [[ $? -ne 0 ]]; then
+        fatal "Failed to re-encrypt ignition key."
+    fi
+
+    okay "✓ Ignition key successfully rotated."
+    info "🔑 Your new ignition passphrase is: $new_passphrase"
+    warn "⚠️  Update any automated systems with this new passphrase."
+}
+
+_ensure_master_key() {
+    if [[ ! -f "$PADLOCK_GLOBAL_KEY" ]]; then
+        info "🔑 Generating global master key..."
+        mkdir -p "$(dirname "$PADLOCK_GLOBAL_KEY")"
+        age-keygen -o "$PADLOCK_GLOBAL_KEY" >/dev/null
+        chmod 600 "$PADLOCK_GLOBAL_KEY"
+        okay "✓ Global master key created at: $PADLOCK_GLOBAL_KEY"
+        warn "⚠️  This key is your ultimate backup. Keep it safe."
+    else
+        trace "Global master key already exists."
+    fi
 }
 
 __print_padlock_config() {

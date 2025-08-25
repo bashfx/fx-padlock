@@ -33,6 +33,30 @@ dispatch() {
         ignite)
             do_ignite "$@"
             ;;
+        rotate)
+            do_rotate "$@"
+            ;;
+        list)
+            do_list "$@"
+            ;;
+        clean-manifest)
+            do_clean_manifest "$@"
+            ;;
+        export)
+            do_export "$@"
+            ;;
+        import)
+            do_import "$@"
+            ;;
+        snapshot)
+            do_snapshot "$@"
+            ;;
+        rewind)
+            do_rewind "$@"
+            ;;
+        overdrive)
+            do_overdrive "$@"
+            ;;
         help|--help|-h)
             usage
             ;;
@@ -78,6 +102,8 @@ COMMANDS:
       --unlock       Unlock chest with ignition key
       --lock         Lock locker into chest
       --status       Show chest status
+    rotate          Rotate keys
+      --ignition     Rotate the ignition key passphrase
 
     key             Manage encryption keys
       --set-global <key>      Store global key
@@ -86,6 +112,20 @@ COMMANDS:
 
     install         Install padlock to your system for global access
     uninstall       Remove padlock from your system
+
+    Manifest Management:
+    list [--all|--ignition|--namespace <ns>]
+                    List tracked repositories
+    clean-manifest  Prune stale entries from the manifest
+
+    Backup and Restore:
+    export [file]   Export entire padlock environment to an encrypted file
+    import <file>   Import an environment from an export file
+    snapshot [name] Create a named backup snapshot of the current environment
+    rewind <name>   Restore the environment from a named snapshot
+
+    Advanced:
+    overdrive       Engage overdrive mode (encrypts entire repo)
 
     help            Show this help
     version         Show version
