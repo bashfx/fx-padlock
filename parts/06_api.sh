@@ -77,6 +77,7 @@ do_clamp() {
     __print_hook "$REPO_ROOT/.githooks/pre-commit" "pre-commit" "$REPO_ROOT"
     __print_hook "$REPO_ROOT/.githooks/post-checkout" "post-checkout" "$REPO_ROOT"
     __print_hook "$REPO_ROOT/.githooks/post-merge" "post-merge" "$REPO_ROOT"
+    __print_hook "$REPO_ROOT/.githooks/post-commit" "post-commit" "$REPO_ROOT"
     trace "Created git hooks"
     
     # Configure git integration
@@ -245,8 +246,9 @@ do_lock() {
     file_count=$(find locker -type f | wc -l)
     trace "📁 Files to encrypt: $file_count"
     
-    # Create archive and encrypt to a temporary file
-    local temp_blob="locker.age.tmp"
+    # Create archive and encrypt to a secure temporary file
+    local temp_blob
+    temp_blob=$(mktemp "$(dirname "$PWD/locker.age")/locker.age.XXXXXX")
     tar -czf - locker | __encrypt_stream > "$temp_blob"
 
     # Check if encryption was successful before proceeding
@@ -339,7 +341,14 @@ do_unlock() {
             if [[ "$expected_checksum" == "$current_checksum" ]]; then
                 okay "✓ Locker integrity verified."
             else
-                warn "Locker integrity check FAILED. Contents may differ from last lock."
+                error "🔒 Integrity check FAILED. Contents may have been tampered with."
+                info "Expected: $expected_checksum"
+                info "Current:  $current_checksum"
+                if [[ "${opt_force:-0}" -eq 1 ]]; then
+                    warn "⚠️  --force flag used, continuing despite integrity failure"
+                else
+                    fatal "Use --force to override integrity check and unlock anyway"
+                fi
             fi
         fi
 
@@ -357,23 +366,6 @@ do_unlock() {
         fatal "Failed to decrypt locker.age. Check your key permissions or repository state."
 
     fi
-
-    case "$filter" in
-        --all)
-            awk -F'|' '!/^#/ { printf "%-15s %-20s %s (%s)\n", $1, $2, $3, $4 }' "$manifest_file"
-            ;;
-        --ignition)
-            awk -F'|' '!/^#/ && $4 == "ignition" && $9 !~ /temp=true/ { printf "%-15s %-20s %s\n", $1, $2, $3 }' "$manifest_file"
-            ;;
-        --namespace)
-            local ns="$2"
-            awk -F'|' -v namespace="$ns" '!/^#/ && $1 == namespace && $9 !~ /temp=true/ { printf "%-20s %s (%s)\n", $2, $3, $4 }' "$manifest_file"
-            ;;
-        *)
-            # Default: exclude temp directories, show namespace/name/path
-            awk -F'|' '!/^#/ && $9 !~ /temp=true/ && $3 !~ /\/tmp\// { printf "%-15s %-20s %s (%s)\n", $1, $2, $3, $4 }' "$manifest_file"
-            ;;
-    esac
 }
 
 do_clean_manifest() {
@@ -439,109 +431,6 @@ do_list() {
             awk -F'|' '!/^#/ && $9 !~ /temp=true/ && $3 !~ /\/tmp\// { printf "%-15s %-20s %s (%s)\n", $1, $2, $3, $4 }' "$manifest_file"
             ;;
     esac
-}
-
-do_clean_manifest() {
-    local manifest_file="$PADLOCK_ETC/manifest.txt"
-
-    if [[ ! -f "$manifest_file" || ! -s "$manifest_file" ]]; then
-        info "Manifest is empty or not found. Nothing to clean."
-        return
-    fi
-
-    local temp_file
-    temp_file=$(mktemp)
-
-    # Preserve header
-    grep "^#" "$manifest_file" > "$temp_file"
-
-    # Use a temporary variable to store the lines to keep
-    local lines_to_keep=""
-    while IFS= read -r line; do
-        # Skip comments
-        [[ "$line" =~ ^# ]] && continue
-
-        # Parse the line
-        IFS='|' read -r namespace name path type remote checksum created access metadata <<< "$line"
-
-        # Keep if the path exists and is not a temp path
-        if [[ -d "$path" && "$metadata" != *"temp=true"* && "$path" != */tmp/* ]]; then
-            lines_to_keep+="$line\n"
-        else
-            trace "Pruning from manifest: $namespace/$name ($path)"
-        fi
-    done < "$manifest_file"
-
-    # Write the kept lines to the temp file
-    printf "%b" "$lines_to_keep" >> "$temp_file"
-
-    mv "$temp_file" "$manifest_file"
-    okay "✓ Manifest cleaned"
-}
-
-do_list() {
-    local filter="$1"
-    local manifest_file="$PADLOCK_ETC/manifest.txt"
-
-    if [[ ! -f "$manifest_file" || ! -s "$manifest_file" ]]; then
-        info "Manifest is empty or not found. No repositories tracked yet."
-        return
-    fi
-
-    case "$filter" in
-        --all)
-            awk -F'|' '!/^#/ { printf "%-15s %-20s %s (%s)\n", $1, $2, $3, $4 }' "$manifest_file"
-            ;;
-        --ignition)
-            awk -F'|' '!/^#/ && $4 == "ignition" && $9 !~ /temp=true/ { printf "%-15s %-20s %s\n", $1, $2, $3 }' "$manifest_file"
-            ;;
-        --namespace)
-            local ns="$2"
-            awk -F'|' -v namespace="$ns" '!/^#/ && $1 == namespace && $9 !~ /temp=true/ { printf "%-20s %s (%s)\n", $2, $3, $4 }' "$manifest_file"
-            ;;
-        *)
-            # Default: exclude temp directories, show namespace/name/path
-            awk -F'|' '!/^#/ && $9 !~ /temp=true/ && $3 !~ /\/tmp\// { printf "%-15s %-20s %s (%s)\n", $1, $2, $3, $4 }' "$manifest_file"
-            ;;
-    esac
-}
-
-do_clean_manifest() {
-    local manifest_file="$PADLOCK_ETC/manifest.txt"
-
-    if [[ ! -f "$manifest_file" || ! -s "$manifest_file" ]]; then
-        info "Manifest is empty or not found. Nothing to clean."
-        return
-    fi
-
-    local temp_file
-    temp_file=$(mktemp)
-
-    # Preserve header
-    grep "^#" "$manifest_file" > "$temp_file"
-
-    # Use a temporary variable to store the lines to keep
-    local lines_to_keep=""
-    while IFS= read -r line; do
-        # Skip comments
-        [[ "$line" =~ ^# ]] && continue
-
-        # Parse the line
-        IFS='|' read -r namespace name path type remote checksum created access metadata <<< "$line"
-
-        # Keep if the path exists and is not a temp path
-        if [[ -d "$path" && "$metadata" != *"temp=true"* && "$path" != */tmp/* ]]; then
-            lines_to_keep+="$line\n"
-        else
-            trace "Pruning from manifest: $namespace/$name ($path)"
-        fi
-    done < "$manifest_file"
-
-    # Write the kept lines to the temp file
-    printf "%b" "$lines_to_keep" >> "$temp_file"
-
-    mv "$temp_file" "$manifest_file"
-    okay "✓ Manifest cleaned"
 }
 
 # Enhanced manifest management
@@ -1110,4 +999,474 @@ do_overdrive() {
             return 1
             ;;
     esac
+}
+
+# Setup command - alias for clamp with common defaults
+do_setup() {
+    local target_path="${1:-.}"
+    
+    info "🔧 Setting up padlock in current repository..."
+    
+    # Default to generating a new key for setup
+    do_clamp "$target_path" --generate
+}
+
+# Key management commands
+do_key() {
+    local action="$1"
+    shift
+    
+    case "$action" in
+        --set-global)
+            local key_file="$1"
+            if [[ ! -f "$key_file" ]]; then
+                fatal "Key file not found: $key_file"
+            fi
+            
+            info "🔑 Setting global master key..."
+            mkdir -p "$(dirname "$PADLOCK_GLOBAL_KEY")"
+            cp "$key_file" "$PADLOCK_GLOBAL_KEY"
+            chmod 600 "$PADLOCK_GLOBAL_KEY"
+            okay "✓ Global master key set"
+            ;;
+        --show-global)
+            if [[ ! -f "$PADLOCK_GLOBAL_KEY" ]]; then
+                error "No global master key found"
+                info "Run: padlock key --generate-global"
+                return 1
+            fi
+            
+            local public_key
+            public_key=$(age-keygen -y "$PADLOCK_GLOBAL_KEY" 2>/dev/null)
+            echo "$public_key"
+            ;;
+        --generate-global)
+            if [[ -f "$PADLOCK_GLOBAL_KEY" ]] && [[ "${2:-}" != "--force" ]]; then
+                error "Global master key already exists"
+                info "Use --force to overwrite"
+                return 1
+            fi
+            
+            _ensure_master_key
+            okay "✓ Global master key generated"
+            ;;
+        --add-recipient)
+            local recipient="$1"
+            if [[ -z "$recipient" ]]; then
+                fatal "--add-recipient requires a public key"
+            fi
+            
+            # Check if we're in a repo with locker config
+            if [[ ! -f "locker/.padlock" ]]; then
+                error "Not in an unlocked padlock repository"
+                info "Run 'padlock unlock' first"
+                return 1
+            fi
+            
+            # Load current config
+            source "locker/.padlock"
+            
+            # Add recipient to existing list
+            if [[ -n "${AGE_RECIPIENTS:-}" ]]; then
+                export AGE_RECIPIENTS="$AGE_RECIPIENTS,$recipient"
+            else
+                export AGE_RECIPIENTS="$recipient"
+            fi
+            
+            # Update config file
+            __print_padlock_config "locker/.padlock" "$(basename "$PWD")"
+            
+            okay "✓ Added recipient: ${recipient:0:20}..."
+            info "Re-encrypt with: padlock lock"
+            ;;
+        *)
+            error "Unknown key action: $action"
+            info "Available actions:"
+            info "  --set-global <key>     Set global master key"
+            info "  --show-global          Display global public key"
+            info "  --generate-global      Generate new global key"
+            info "  --add-recipient <key>  Add recipient to current repo"
+            return 1
+            ;;
+    esac
+}
+
+# Safe declamp operation - remove padlock infrastructure while preserving data
+do_declamp() {
+    local repo_path="${1:-.}"
+    local force="${2:-}"
+    
+    repo_path="$(realpath "$repo_path")"
+    
+    # Validate target
+    if ! is_git_repo "$repo_path"; then
+        fatal "Target is not a git repository: $repo_path"
+    fi
+    
+    REPO_ROOT="$(_get_repo_root "$repo_path")"
+    
+    # Check if padlock is deployed
+    if ! is_deployed "$REPO_ROOT"; then
+        error "Padlock not deployed in this repository"
+        info "Nothing to declamp"
+        return 1
+    fi
+    
+    lock "🔓 Safely declamping padlock from repository..."
+    
+    # Ensure repository is unlocked first
+    if [[ -f "$REPO_ROOT/locker.age" ]] || [[ -d "$REPO_ROOT/.chest" ]]; then
+        if [[ "$force" != "--force" ]]; then
+            error "Repository is locked. Unlock first or use --force"
+            info "To unlock: padlock unlock"
+            info "Or force: padlock declamp --force"
+            return 1
+        fi
+        
+        # Force unlock before declamp
+        warn "Force-unlocking locked repository..."
+        if [[ -f "$REPO_ROOT/locker.age" ]]; then
+            info "Unlocking standard locker..."
+            if ! (cd "$REPO_ROOT" && "$REPO_ROOT/bin/padlock" unlock); then
+                fatal "Failed to unlock repository for declamp"
+            fi
+        elif [[ -d "$REPO_ROOT/.chest" ]]; then
+            info "Unlocking chest mode..."
+            if ! (cd "$REPO_ROOT" && "$REPO_ROOT/bin/padlock" ignite --unlock); then
+                fatal "Failed to unlock chest for declamp"
+            fi
+        fi
+    fi
+    
+    # Show what will be preserved
+    if [[ -d "$REPO_ROOT/locker" ]]; then
+        local file_count
+        file_count=$(find "$REPO_ROOT/locker" -type f | wc -l)
+        info "📁 Preserving $file_count files from locker/ (will remain as plaintext)"
+    else
+        warn "No locker directory found - nothing to preserve"
+    fi
+    
+    # Show what will be removed
+    local items_to_remove=()
+    [[ -d "$REPO_ROOT/bin" ]] && items_to_remove+=("bin/")
+    [[ -d "$REPO_ROOT/.githooks" ]] && items_to_remove+=(".githooks/")
+    [[ -f "$REPO_ROOT/locker.age" ]] && items_to_remove+=("locker.age")
+    [[ -f "$REPO_ROOT/.locked" ]] && items_to_remove+=(".locked")
+    [[ -d "$REPO_ROOT/.chest" ]] && items_to_remove+=(".chest/")
+    [[ -f "$REPO_ROOT/SECURITY.md" ]] && items_to_remove+=("SECURITY.md")
+    
+    if [[ ${#items_to_remove[@]} -gt 0 ]]; then
+        info "🗑️  Will remove: ${items_to_remove[*]}"
+    fi
+    
+    # Confirm destructive operation
+    if [[ "$force" != "--force" ]]; then
+        echo
+        warn "⚠️  This will permanently remove padlock infrastructure"
+        read -p "Continue? (y/N): " -r response
+        if [[ ! "$response" =~ ^[Yy]$ ]]; then
+            info "Declamp cancelled"
+            return 0
+        fi
+    fi
+    
+    # Remove padlock infrastructure
+    local removed_items=()
+    
+    # Remove bin directory
+    if [[ -d "$REPO_ROOT/bin" ]]; then
+        rm -rf "$REPO_ROOT/bin"
+        removed_items+=("bin/")
+    fi
+    
+    # Remove git hooks
+    if [[ -d "$REPO_ROOT/.githooks" ]]; then
+        rm -rf "$REPO_ROOT/.githooks"
+        removed_items+=(".githooks/")
+    fi
+    
+    # Remove encrypted artifacts
+    if [[ -f "$REPO_ROOT/locker.age" ]]; then
+        rm -f "$REPO_ROOT/locker.age"
+        removed_items+=("locker.age")
+    fi
+    
+    if [[ -f "$REPO_ROOT/.locked" ]]; then
+        rm -f "$REPO_ROOT/.locked"
+        removed_items+=(".locked")
+    fi
+    
+    if [[ -d "$REPO_ROOT/.chest" ]]; then
+        rm -rf "$REPO_ROOT/.chest"
+        removed_items+=(".chest/")
+    fi
+    
+    # Remove other padlock files
+    rm -f "$REPO_ROOT/.locker_checksum"
+    rm -f "$REPO_ROOT/.overdrive"
+    rm -f "$REPO_ROOT/super_chest.age"
+    
+    # Clean up .gitattributes (remove padlock lines)
+    if [[ -f "$REPO_ROOT/.gitattributes" ]]; then
+        local temp_attrs
+        temp_attrs=$(mktemp)
+        grep -v "locker.age\|filter=locker-crypt\|bin/\*\|.githooks/\*" "$REPO_ROOT/.gitattributes" > "$temp_attrs" || true
+        mv "$temp_attrs" "$REPO_ROOT/.gitattributes"
+        
+        # Remove file if empty (except comments and whitespace)
+        if ! grep -q "^[^#[:space:]]" "$REPO_ROOT/.gitattributes" 2>/dev/null; then
+            rm -f "$REPO_ROOT/.gitattributes"
+            removed_items+=(".gitattributes")
+        fi
+    fi
+    
+    # Clean up .gitignore (remove padlock lines)
+    if [[ -f "$REPO_ROOT/.gitignore" ]]; then
+        local temp_ignore
+        temp_ignore=$(mktemp)
+        grep -v "^locker/$\|^# Padlock" "$REPO_ROOT/.gitignore" > "$temp_ignore" || true
+        mv "$temp_ignore" "$REPO_ROOT/.gitignore"
+    fi
+    
+    # Remove git configuration
+    (cd "$REPO_ROOT" && {
+        git config --unset filter.locker-crypt.clean 2>/dev/null || true
+        git config --unset filter.locker-crypt.smudge 2>/dev/null || true
+        git config --unset filter.locker-crypt.required 2>/dev/null || true
+        git config --unset core.hooksPath 2>/dev/null || true
+    })
+    
+    # Remove from global manifest
+    local manifest_file="$PADLOCK_ETC/manifest.txt"
+    if [[ -f "$manifest_file" ]]; then
+        local temp_manifest
+        temp_manifest=$(mktemp)
+        grep -v -F "$REPO_ROOT" "$manifest_file" > "$temp_manifest" 2>/dev/null || true
+        mv "$temp_manifest" "$manifest_file"
+        trace "Removed from global manifest"
+    fi
+    
+    # Remove template SECURITY.md if it's the padlock one
+    if [[ -f "$REPO_ROOT/SECURITY.md" ]] && grep -q "Padlock" "$REPO_ROOT/SECURITY.md" 2>/dev/null; then
+        rm -f "$REPO_ROOT/SECURITY.md"
+        removed_items+=("SECURITY.md")
+    fi
+    
+    # Success message
+    okay "✓ Padlock safely removed from repository"
+    
+    if [[ -d "$REPO_ROOT/locker" ]]; then
+        local preserved_count
+        preserved_count=$(find "$REPO_ROOT/locker" -type f | wc -l)
+        okay "✅ Preserved $preserved_count files in locker/ (now unencrypted)"
+        warn "⚠️  locker/ is now unencrypted plaintext"
+        info "💡 Add 'locker/' to .gitignore before committing"
+    fi
+    
+    if [[ ${#removed_items[@]} -gt 0 ]]; then
+        info "🗑️  Removed: ${removed_items[*]}"
+    fi
+    
+    info "📋 Repository restored to standard git repo"
+}
+
+# Revocation operations - remove access to encrypted content
+do_revoke() {
+    local target="$1"
+    local force="${2:-}"
+    
+    case "$target" in
+        --local)
+            _revoke_local_access "$force"
+            ;;
+        -K|--ignition)
+            _revoke_ignition_access "$force"
+            ;;
+        *)
+            error "Unknown revocation target: $target"
+            info "Available targets:"
+            info "  --local       Revoke local access (WARNING: makes content unrecoverable)"
+            info "  --ignition    Revoke ignition key access"
+            return 1
+            ;;
+    esac
+}
+
+# Revoke local access - WARNING: This makes content permanently unrecoverable
+_revoke_local_access() {
+    local force="$1"
+    
+    REPO_ROOT="$(_get_repo_root .)"
+    
+    error "⚠️  DESTRUCTIVE OPERATION: Local access revocation"
+    warn "This will make ALL encrypted content permanently unrecoverable!"
+    warn "Even with master keys, the content will be lost."
+    echo
+    info "This operation will:"
+    info "  • Remove local repository key"
+    info "  • Remove master key references"
+    info "  • Leave locker.age encrypted but unrecoverable"
+    echo
+    
+    if [[ "$force" != "--force" ]]; then
+        error "This operation requires --force flag to confirm"
+        info "Usage: padlock revoke --local --force"
+        return 1
+    fi
+    
+    # Additional confirmation
+    echo
+    warn "⚠️  FINAL WARNING: This will permanently destroy access to encrypted data"
+    read -p "Type 'DESTROY' to confirm: " -r confirm
+    if [[ "$confirm" != "DESTROY" ]]; then
+        info "Revocation cancelled"
+        return 0
+    fi
+    
+    local revoked_items=()
+    
+    # Remove local repository key
+    local repo_key="$PADLOCK_KEYS/$(basename "$REPO_ROOT").key"
+    if [[ -f "$repo_key" ]]; then
+        rm -f "$repo_key"
+        revoked_items+=("local repository key")
+    fi
+    
+    # Remove master key reference from any config
+    if [[ -f "$REPO_ROOT/locker/.padlock" ]]; then
+        # If unlocked, remove master key from recipients
+        source "$REPO_ROOT/locker/.padlock"
+        if [[ -n "${AGE_RECIPIENTS:-}" ]]; then
+            # Remove master key recipient
+            local master_public
+            if [[ -f "$PADLOCK_GLOBAL_KEY" ]]; then
+                master_public=$(age-keygen -y "$PADLOCK_GLOBAL_KEY" 2>/dev/null || true)
+                if [[ -n "$master_public" ]]; then
+                    # Remove master key from recipients list
+                    AGE_RECIPIENTS=$(echo "$AGE_RECIPIENTS" | sed "s/,$master_public//g" | sed "s/$master_public,//g" | sed "s/$master_public//g")
+                    export AGE_RECIPIENTS
+                    __print_padlock_config "$REPO_ROOT/locker/.padlock" "$(basename "$REPO_ROOT")"
+                    revoked_items+=("master key access")
+                fi
+            fi
+        fi
+    fi
+    
+    # Remove from manifest
+    local manifest_file="$PADLOCK_ETC/manifest.txt"
+    if [[ -f "$manifest_file" ]]; then
+        local temp_manifest
+        temp_manifest=$(mktemp)
+        grep -v -F "$REPO_ROOT" "$manifest_file" > "$temp_manifest" 2>/dev/null || true
+        mv "$temp_manifest" "$manifest_file"
+        revoked_items+=("manifest entry")
+    fi
+    
+    # Create revocation marker
+    cat > "$REPO_ROOT/.revoked" << EOF
+# Padlock Access Revoked
+# Generated: $(date)
+# Repository: $(basename "$REPO_ROOT")
+
+This repository's encryption keys have been revoked.
+The encrypted content in locker.age is permanently unrecoverable.
+
+Revoked access types:
+$(printf "  • %s\n" "${revoked_items[@]}")
+
+If this was done in error, restore from backup immediately.
+EOF
+    
+    error "🔒 Local access permanently revoked"
+    if [[ ${#revoked_items[@]} -gt 0 ]]; then
+        info "Revoked: ${revoked_items[*]}"
+    fi
+    warn "⚠️  Encrypted content is now permanently unrecoverable"
+    info "💀 Created .revoked file as marker"
+}
+
+# Revoke ignition access - removes ignition key system
+_revoke_ignition_access() {
+    local force="$1"
+    
+    REPO_ROOT="$(_get_repo_root .)"
+    
+    if [[ ! -d "$REPO_ROOT/.chest" ]]; then
+        error "Repository is not using ignition system"
+        info "Nothing to revoke"
+        return 1
+    fi
+    
+    lock "🔥 Revoking ignition key access..."
+    
+    local revoked_items=()
+    
+    # Remove ignition key files
+    if [[ -f "$REPO_ROOT/.chest/ignition.age" ]]; then
+        rm -f "$REPO_ROOT/.chest/ignition.age"
+        revoked_items+=("encrypted ignition key")
+    fi
+    
+    # Remove any temporary ignition keys
+    rm -f "$REPO_ROOT/.ignition.key"
+    
+    # If chest is unlocked, we need to transition to standard mode
+    if [[ -d "$REPO_ROOT/locker" ]] && [[ -f "$REPO_ROOT/locker/.padlock" ]]; then
+        info "Converting from ignition to standard mode..."
+        
+        # Generate new repository key
+        local new_repo_key="$PADLOCK_KEYS/$(basename "$REPO_ROOT").key"
+        age-keygen -o "$new_repo_key" >/dev/null
+        chmod 600 "$new_repo_key"
+        
+        # Get new public key
+        local new_public
+        new_public=$(age-keygen -y "$new_repo_key")
+        
+        # Update configuration to standard mode with master key backup
+        _ensure_master_key
+        local master_public
+        master_public=$(age-keygen -y "$PADLOCK_GLOBAL_KEY")
+        
+        export AGE_RECIPIENTS="$new_public,$master_public"
+        export AGE_KEY_FILE="$new_repo_key"
+        export AGE_PASSPHRASE=""
+        
+        __print_padlock_config "$REPO_ROOT/locker/.padlock" "$(basename "$REPO_ROOT")"
+        
+        info "🔑 Generated new repository key for standard mode"
+        revoked_items+=("ignition system")
+        revoked_items+=("converted to standard mode")
+    fi
+    
+    # Remove chest directory if empty
+    if [[ -d "$REPO_ROOT/.chest" ]] && [[ -z "$(ls -A "$REPO_ROOT/.chest" 2>/dev/null)" ]]; then
+        rm -rf "$REPO_ROOT/.chest"
+        revoked_items+=("chest directory")
+    fi
+    
+    # Update manifest type
+    local manifest_file="$PADLOCK_ETC/manifest.txt"
+    if [[ -f "$manifest_file" ]]; then
+        local temp_manifest
+        temp_manifest=$(mktemp)
+        # Change type from ignition to standard
+        sed "s/|$REPO_ROOT|ignition|/|$REPO_ROOT|standard|/g" "$manifest_file" > "$temp_manifest" 2>/dev/null || true
+        mv "$temp_manifest" "$manifest_file"
+        trace "Updated manifest type to standard"
+    fi
+    
+    okay "✓ Ignition access revoked"
+    if [[ ${#revoked_items[@]} -gt 0 ]]; then
+        info "Changes: ${revoked_items[*]}"
+    fi
+    
+    if [[ -d "$REPO_ROOT/locker" ]]; then
+        info "📝 Repository is now in standard mode"
+        info "🔐 Re-encrypt with: padlock lock"
+    else
+        info "🔒 Repository remains locked in standard mode"
+        info "🔓 Unlock with: padlock unlock"
+    fi
 }

@@ -158,7 +158,7 @@ __install_age() {
 }
 
 __install_age_binary() {
-    local os arch download_url
+    local os arch download_url secure_temp
     
     os="$(uname -s | tr '[:upper:]' '[:lower:]')"
     arch="$(uname -m)"
@@ -174,17 +174,61 @@ __install_age_binary() {
         *) fatal "Unsupported OS: $os" ;;
     esac
     
-    download_url="https://github.com/FiloSottile/age/releases/latest/download/age-v1.1.1-${os}-${arch}.tar.gz"
+    # Use latest stable version with checksum verification
+    local version="v1.2.1"  # Latest stable version (security fix)
+    download_url="https://github.com/FiloSottile/age/releases/download/${version}/age-${version}-${os}-${arch}.tar.gz"
+    local checksum_url="https://github.com/FiloSottile/age/releases/download/${version}/age-${version}-checksums.txt"
+    
     trace "Downloading: $download_url"
+    trace "Checksums: $checksum_url"
     
-    curl -sL "$download_url" | tar xz --strip-components=1 -C /tmp
+    # Create secure temporary directory
+    secure_temp=$(mktemp -d)
+    trap "rm -rf '$secure_temp'" EXIT
     
-    if sudo mv /tmp/age /usr/local/bin/ 2>/dev/null && sudo mv /tmp/age-keygen /usr/local/bin/ 2>/dev/null; then
+    # Download binary and checksums
+    if ! curl -sL "$download_url" -o "$secure_temp/age.tar.gz"; then
+        fatal "Failed to download age binary"
+    fi
+    
+    if ! curl -sL "$checksum_url" -o "$secure_temp/checksums.txt"; then
+        warn "Failed to download checksums - proceeding without verification"
+        warn "⚠️  This reduces security - consider manual verification"
+    else
+        # Verify checksum
+        local expected_file="age-${version}-${os}-${arch}.tar.gz"
+        local expected_checksum
+        expected_checksum=$(grep "$expected_file" "$secure_temp/checksums.txt" | awk '{print $1}')
+        
+        if [[ -n "$expected_checksum" ]]; then
+            local actual_checksum
+            actual_checksum=$(sha256sum "$secure_temp/age.tar.gz" | awk '{print $1}')
+            
+            if [[ "$expected_checksum" == "$actual_checksum" ]]; then
+                okay "✓ Checksum verification passed"
+                trace "Expected: $expected_checksum"
+                trace "Actual:   $actual_checksum"
+            else
+                error "🔒 Checksum verification FAILED"
+                error "Expected: $expected_checksum"
+                error "Actual:   $actual_checksum"
+                fatal "Binary integrity compromised - aborting installation"
+            fi
+        else
+            warn "Could not find checksum for $expected_file in checksums.txt"
+            warn "⚠️  Proceeding without checksum verification"
+        fi
+    fi
+    
+    # Extract verified binary
+    tar xz --strip-components=1 -C "$secure_temp" -f "$secure_temp/age.tar.gz"
+    
+    if sudo mv "$secure_temp/age" /usr/local/bin/ 2>/dev/null && sudo mv "$secure_temp/age-keygen" /usr/local/bin/ 2>/dev/null; then
         trace "Installed to /usr/local/bin/"
     else
         mkdir -p "$HOME/.local/bin"
-        mv /tmp/age "$HOME/.local/bin/"
-        mv /tmp/age-keygen "$HOME/.local/bin/"
+        mv "$secure_temp/age" "$HOME/.local/bin/"
+        mv "$secure_temp/age-keygen" "$HOME/.local/bin/"
         export PATH="$HOME/.local/bin:$PATH"
         trace "Installed to $HOME/.local/bin/"
     fi
@@ -357,11 +401,19 @@ _unlock_chest() {
 }
 
 _generate_ignition_key() {
-    # Generate a memorable, 6-part passphrase from a curated wordlist.
+    # Generate a memorable, 6-part passphrase from a curated wordlist using cryptographically secure random
     local words=("flame" "rocket" "boost" "spark" "launch" "fire" "power" "thrust" "ignite" "blast" "nova" "comet" "star" "orbit" "galaxy" "nebula")
     local key=""
     for i in {1..6}; do
-        key+="${words[$RANDOM % ${#words[@]}]}"
+        # Use shuf with /dev/urandom for cryptographically secure random selection
+        local word_index
+        if command -v shuf >/dev/null 2>&1; then
+            word_index=$(shuf -i 0-$((${#words[@]}-1)) -n 1)
+        else
+            # Fallback using /dev/urandom directly if shuf not available
+            word_index=$(od -An -N1 -tu1 < /dev/urandom | awk -v max=${#words[@]} '{print $1 % max}')
+        fi
+        key+="${words[$word_index]}"
         [[ $i -lt 6 ]] && key+="-"
     done
     echo "$key"

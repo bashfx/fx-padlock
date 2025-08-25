@@ -42,6 +42,12 @@ dispatch() {
         clean-manifest)
             do_clean_manifest "$@"
             ;;
+        declamp)
+            do_declamp "$@"
+            ;;
+        revoke)
+            do_revoke "$@"
+            ;;
 
         export)
             do_export "$@"
