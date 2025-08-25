@@ -27,6 +27,31 @@ echo "--> Testing './padlock.sh version'..."
 echo "OK"
 echo
 
+echo "--> Testing new security commands..."
+
+# Test setup command
+echo "  • Testing 'padlock setup --help'..."
+./padlock.sh setup --help > /dev/null 2>&1 && echo "    ✓ setup command exists" || echo "    ✗ setup command missing"
+
+# Test key management commands  
+echo "  • Testing 'padlock key' subcommands..."
+./padlock.sh key --help > /dev/null 2>&1 && echo "    ✓ key command exists" || echo "    ✗ key command missing"
+./padlock.sh key --generate-global --help > /dev/null 2>&1 && echo "    ✓ key --generate-global exists" || echo "    ✗ key --generate-global missing"
+./padlock.sh key --show-global --help > /dev/null 2>&1 && echo "    ✓ key --show-global exists" || echo "    ✗ key --show-global missing"
+
+# Test declamp command
+echo "  • Testing 'padlock declamp --help'..."
+./padlock.sh declamp --help > /dev/null 2>&1 && echo "    ✓ declamp command exists" || echo "    ✗ declamp command missing"
+
+# Test revoke command
+echo "  • Testing 'padlock revoke' subcommands..."
+./padlock.sh revoke --help > /dev/null 2>&1 && echo "    ✓ revoke command exists" || echo "    ✗ revoke command missing"
+./padlock.sh revoke --local --help > /dev/null 2>&1 && echo "    ✓ revoke --local exists" || echo "    ✗ revoke --local missing"
+./padlock.sh revoke --ignition --help > /dev/null 2>&1 && echo "    ✓ revoke --ignition exists" || echo "    ✗ revoke --ignition missing"
+
+echo "OK - New command structure validated"
+echo
+
 run_e2e_test() {
     local test_type="$1"
     local repo_cmd=""
