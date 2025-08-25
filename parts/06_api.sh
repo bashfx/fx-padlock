@@ -270,6 +270,7 @@ do_lock() {
         # Create a simple state file to indicate locked status
         touch .locked
         
+
         # Remove plaintext locker *after* successful encryption and move
         rm -rf locker
         
@@ -354,7 +355,128 @@ do_unlock() {
 
     else
         fatal "Failed to decrypt locker.age. Check your key permissions or repository state."
+
     fi
+
+    case "$filter" in
+        --all)
+            awk -F'|' '!/^#/ { printf "%-15s %-20s %s (%s)\n", $1, $2, $3, $4 }' "$manifest_file"
+            ;;
+        --ignition)
+            awk -F'|' '!/^#/ && $4 == "ignition" && $9 !~ /temp=true/ { printf "%-15s %-20s %s\n", $1, $2, $3 }' "$manifest_file"
+            ;;
+        --namespace)
+            local ns="$2"
+            awk -F'|' -v namespace="$ns" '!/^#/ && $1 == namespace && $9 !~ /temp=true/ { printf "%-20s %s (%s)\n", $2, $3, $4 }' "$manifest_file"
+            ;;
+        *)
+            # Default: exclude temp directories, show namespace/name/path
+            awk -F'|' '!/^#/ && $9 !~ /temp=true/ && $3 !~ /\/tmp\// { printf "%-15s %-20s %s (%s)\n", $1, $2, $3, $4 }' "$manifest_file"
+            ;;
+    esac
+}
+
+do_clean_manifest() {
+    local manifest_file="$PADLOCK_ETC/manifest.txt"
+
+    if [[ ! -f "$manifest_file" || ! -s "$manifest_file" ]]; then
+        info "Manifest is empty or not found. Nothing to clean."
+        return
+    fi
+
+    local temp_file
+    temp_file=$(mktemp)
+
+    # Preserve header
+    grep "^#" "$manifest_file" > "$temp_file"
+
+    # Use a temporary variable to store the lines to keep
+    local lines_to_keep=""
+    while IFS= read -r line; do
+        # Skip comments
+        [[ "$line" =~ ^# ]] && continue
+
+        # Parse the line
+        IFS='|' read -r namespace name path type remote checksum created access metadata <<< "$line"
+
+        # Keep if the path exists and is not a temp path
+        if [[ -d "$path" && "$metadata" != *"temp=true"* && "$path" != */tmp/* ]]; then
+            lines_to_keep+="$line\n"
+        else
+            trace "Pruning from manifest: $namespace/$name ($path)"
+        fi
+    done < "$manifest_file"
+
+    # Write the kept lines to the temp file
+    printf "%b" "$lines_to_keep" >> "$temp_file"
+
+    mv "$temp_file" "$manifest_file"
+    okay "✓ Manifest cleaned"
+}
+
+do_list() {
+    local filter="$1"
+    local manifest_file="$PADLOCK_ETC/manifest.txt"
+
+    if [[ ! -f "$manifest_file" || ! -s "$manifest_file" ]]; then
+        info "Manifest is empty or not found. No repositories tracked yet."
+        return
+    fi
+
+    case "$filter" in
+        --all)
+            awk -F'|' '!/^#/ { printf "%-15s %-20s %s (%s)\n", $1, $2, $3, $4 }' "$manifest_file"
+            ;;
+        --ignition)
+            awk -F'|' '!/^#/ && $4 == "ignition" && $9 !~ /temp=true/ { printf "%-15s %-20s %s\n", $1, $2, $3 }' "$manifest_file"
+            ;;
+        --namespace)
+            local ns="$2"
+            awk -F'|' -v namespace="$ns" '!/^#/ && $1 == namespace && $9 !~ /temp=true/ { printf "%-20s %s (%s)\n", $2, $3, $4 }' "$manifest_file"
+            ;;
+        *)
+            # Default: exclude temp directories, show namespace/name/path
+            awk -F'|' '!/^#/ && $9 !~ /temp=true/ && $3 !~ /\/tmp\// { printf "%-15s %-20s %s (%s)\n", $1, $2, $3, $4 }' "$manifest_file"
+            ;;
+    esac
+}
+
+do_clean_manifest() {
+    local manifest_file="$PADLOCK_ETC/manifest.txt"
+
+    if [[ ! -f "$manifest_file" || ! -s "$manifest_file" ]]; then
+        info "Manifest is empty or not found. Nothing to clean."
+        return
+    fi
+
+    local temp_file
+    temp_file=$(mktemp)
+
+    # Preserve header
+    grep "^#" "$manifest_file" > "$temp_file"
+
+    # Use a temporary variable to store the lines to keep
+    local lines_to_keep=""
+    while IFS= read -r line; do
+        # Skip comments
+        [[ "$line" =~ ^# ]] && continue
+
+        # Parse the line
+        IFS='|' read -r namespace name path type remote checksum created access metadata <<< "$line"
+
+        # Keep if the path exists and is not a temp path
+        if [[ -d "$path" && "$metadata" != *"temp=true"* && "$path" != */tmp/* ]]; then
+            lines_to_keep+="$line\n"
+        else
+            trace "Pruning from manifest: $namespace/$name ($path)"
+        fi
+    done < "$manifest_file"
+
+    # Write the kept lines to the temp file
+    printf "%b" "$lines_to_keep" >> "$temp_file"
+
+    mv "$temp_file" "$manifest_file"
+    okay "✓ Manifest cleaned"
 }
 
 do_list() {
@@ -475,6 +597,7 @@ _add_to_manifest() {
     if [[ "$repo_path" == */tmp/* ]] || [[ "$repo_path" == */temp/* ]]; then
         metadata="temp=true"
     fi
+
 
     # Add new entry
     echo "$namespace|$repo_name|$repo_path|$repo_type|$remote_url|$checksum|$now|$now|$metadata" >> "$manifest_file"
@@ -607,6 +730,7 @@ do_rotate() {
             ;;
     esac
 }
+
 
 do_export() {
     local export_file="${1:-padlock_export_$(date +%Y%m%d_%H%M%S).tar.age}"
@@ -924,6 +1048,7 @@ _overdrive_lock() {
     # Create super_chest directory for staging
     local super_chest="$REPO_ROOT/.super_chest"
     mkdir -p "$super_chest"
+
     trap 'rm -rf "$super_chest"' EXIT
 
     # Use tar to copy files, which is more reliable than rsync for this case
@@ -947,11 +1072,13 @@ _overdrive_lock() {
     super_checksum=$(_calculate_locker_checksum "$super_chest")
 
     tar --sort=name --mtime='@0' --owner=0 --group=0 --numeric-owner \
+
         -C "$super_chest" -czf - . | __encrypt_stream > "$REPO_ROOT/super_chest.age"
 
     # Remove everything except padlock infrastructure and super_chest.age
     find "$REPO_ROOT" -maxdepth 1 -mindepth 1 \
         ! -name ".super_chest" \
+
         ! -name "bin" \
         ! -name ".chest" \
         ! -name ".git" \

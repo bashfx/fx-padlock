@@ -231,6 +231,11 @@ run_manifest_tests
 run_integrity_check_test
 # run_overdrive_tests
 
+run_manifest_tests
+run_integrity_check_test
+run_overdrive_tests
+
+
 echo
 echo "================================"
 echo "✓ All tests passed."
