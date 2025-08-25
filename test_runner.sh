@@ -146,6 +146,7 @@ test_security_commands() {
     echo "$help_output" | grep -q "revoke" && echo "│ ✓ revoke command in help" || echo "│ ✗ revoke missing from help"
     echo "$help_output" | grep -q "repair" && echo "│ ✓ repair command in help" || echo "│ ✗ repair missing from help"
     echo "$help_output" | grep -q "map" && echo "│ ✓ map command in help" || echo "│ ✗ map missing from help"
+    echo "$help_output" | grep -q "unmap" && echo "│ ✓ unmap command in help" || echo "│ ✗ unmap missing from help"
     
     echo "│"
     echo "│ Testing command responses..."
@@ -155,6 +156,7 @@ test_security_commands() {
     ./padlock.sh revoke 2>/dev/null && echo "│ ✓ revoke responds correctly" || echo "│ ✗ revoke failed"
     ./padlock.sh repair 2>/dev/null && echo "│ ✓ repair responds correctly" || echo "│ ✗ repair failed"
     ./padlock.sh map 2>/dev/null && echo "│ ✓ map responds correctly" || echo "│ ✗ map failed"
+    ./padlock.sh unmap 2>/dev/null && echo "│ ✓ unmap responds correctly" || echo "│ ✗ unmap failed"
 }
 
 # Run isolated tests
@@ -226,8 +228,8 @@ run_e2e_test() {
     ./bin/padlock lock > /dev/null
     echo "│ ✓ Secrets encrypted successfully"
 
-    # 8. Check that lock worked
-    if [ -d "locker" ] || [ ! -f "locker.age" ] || [ ! -f ".locked" ]; then
+    # 8. Check that lock worked - updated for .chest pattern
+    if [ -d "locker" ] || [ ! -f ".chest/locker.age" ] || [ ! -f ".chest/.locked" ]; then
         echo "│ ✗ ERROR: Encryption did not complete properly"
         exit 1
     fi
@@ -238,8 +240,8 @@ run_e2e_test() {
     ./bin/padlock unlock > /dev/null
     echo "│ ✓ Secrets decrypted successfully"
 
-    # 10. Check that unlock worked
-    if [ ! -d "locker" ] || [ -f "locker.age" ] || [ -f ".locked" ]; then
+    # 10. Check that unlock worked - updated for .chest pattern
+    if [ ! -d "locker" ] || [ -f ".chest/locker.age" ] || [ -f ".chest/.locked" ]; then
         echo "│ ✗ ERROR: Decryption did not restore properly"
         exit 1
     fi
@@ -352,6 +354,110 @@ run_ignition_backup_test() {
     test_end
 }
 
+run_map_functionality_test() {
+    local test_num="$1"
+    
+    test_box "Map/Unmap & Chest Pattern" "$test_num"
+    echo "│ Testing new file mapping and chest pattern functionality..."
+    echo "│"
+    
+    # Create test environment
+    local test_dir
+    mkdir -p "$HOME/.cache/tmp"
+    test_dir=$(mktemp -d -p "$HOME/.cache/tmp")
+    local original_dir
+    original_dir=$(pwd)
+    
+    # Setup cleanup
+    trap "rm -rf '$test_dir'" EXIT
+    
+    cd "$test_dir"
+    
+    echo "│ → Setting up test repository..."
+    git init -b main > /dev/null 2>&1
+    git config user.email "test@example.com" > /dev/null 2>&1
+    git config user.name "Test User" > /dev/null 2>&1
+    
+    # Deploy padlock
+    "$original_dir/padlock.sh" clamp . --generate > /dev/null 2>&1
+    echo "│ ✓ Test repository prepared"
+    
+    # Create external files to map
+    echo "│ → Creating external test files..."
+    echo "external file content" > external_file.txt
+    mkdir -p external_dir
+    echo "nested content" > external_dir/nested.txt
+    echo "│ ✓ External files created"
+    
+    # Test map command
+    echo "│ → Testing map command..."
+    ./bin/padlock map external_file.txt > /dev/null 2>&1
+    ./bin/padlock map external_dir > /dev/null 2>&1
+    
+    # Verify padlock.map exists and has content
+    if [[ -f "padlock.map" ]] && grep -q "external_file.txt" padlock.map; then
+        echo "│ ✓ Map command creates padlock.map with entries"
+    else
+        echo "│ ✗ Map command failed to create proper manifest"
+        return 1
+    fi
+    
+    # Test lock with mapped files
+    echo "│ → Testing lock with mapped files..."
+    ./bin/padlock lock > /dev/null 2>&1
+    
+    # Verify .chest pattern
+    if [[ -d ".chest" ]] && [[ -f ".chest/locker.age" ]] && [[ -f ".chest/.locked" ]]; then
+        echo "│ ✓ Chest pattern implemented correctly"
+    else
+        echo "│ ✗ Chest pattern not working"
+        return 1
+    fi
+    
+    # Verify repository is clean (no padlock.map in root)
+    if [[ ! -f "padlock.map" ]]; then
+        echo "│ ✓ Repository root clean during lock"
+    else
+        echo "│ ✗ padlock.map not moved to chest"
+        return 1
+    fi
+    
+    # Test unlock with mapped file restoration
+    echo "│ → Testing unlock with file restoration..."
+    ./bin/padlock unlock > /dev/null 2>&1
+    
+    # Verify files were restored
+    if [[ -f "external_file.txt" ]] && [[ -f "external_dir/nested.txt" ]]; then
+        echo "│ ✓ Mapped files restored correctly"
+    else
+        echo "│ ✗ Mapped files not restored"
+        return 1
+    fi
+    
+    # Verify padlock.map is back
+    if [[ -f "padlock.map" ]] && grep -q "external_file.txt" padlock.map; then
+        echo "│ ✓ padlock.map restored to root"
+    else
+        echo "│ ✗ padlock.map not restored"
+        return 1
+    fi
+    
+    # Test unmap command
+    echo "│ → Testing unmap command..."
+    echo "y" | ./bin/padlock unmap external_file.txt > /dev/null 2>&1
+    
+    # Verify file was unmapped
+    if ! grep -q "external_file.txt" padlock.map 2>/dev/null; then
+        echo "│ ✓ Unmap command working correctly"
+    else
+        echo "│ ✗ Unmap command failed"
+        return 1
+    fi
+    
+    test_end
+    cd "$original_dir"
+}
+
 run_install_tests() {
     local test_num="$1"
     
@@ -437,8 +543,9 @@ run_e2e_test "git" "04"
 run_e2e_test "gitsim" "05" 
 run_repair_test "06"
 run_ignition_backup_test "07"
-run_install_tests "08"
-run_overdrive_tests "09"
+run_map_functionality_test "08"
+run_install_tests "09"
+run_overdrive_tests "10"
 
 
 echo

@@ -51,6 +51,9 @@ dispatch() {
         map)
             do_map "$@"
             ;;
+        unmap)
+            do_unmap "$@"
+            ;;
         path)
             do_path "$@"
             ;;
@@ -85,7 +88,9 @@ dispatch() {
             usage
             ;;
         version|--version|-v)
+            _logo
             printf "padlock %s\n" "$PADLOCK_VERSION"
+            printf "PADLOCK (c) 2025 Qodeninja for BASHFX\n"
             ;;
         dev_test)
             if is_dev; then
@@ -103,6 +108,7 @@ dispatch() {
 }
 
 usage() {
+    _logo
     cat << 'USAGE_EOF'
 Padlock - Git Repository Security Orchestrator
 
@@ -153,6 +159,7 @@ COMMANDS:
     Advanced:
     map <path>      Map additional files/dirs for inclusion in chest
       add|remove    Add or remove path from mappings (default: add)
+    unmap <path|all> Remove files/dirs from mappings (with selection support)
     path [repo]     Show computed storage paths for keys and artifacts
     remote [repo]   Update artifacts for remote namespace (after adding git remote)
     overdrive       Engage overdrive mode (encrypts entire repo)
@@ -237,7 +244,9 @@ options() {
                 exit 0
                 ;;
             -v|--version)
+                _logo
                 printf "padlock %s\n" "$PADLOCK_VERSION"
+                printf "PADLOCK (c) 2025 Qodeninja for BASHFX\n"
                 exit 0
                 ;;
             --)

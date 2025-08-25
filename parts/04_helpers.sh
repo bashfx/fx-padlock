@@ -274,6 +274,18 @@ _calculate_locker_checksum() {
         cut -d' ' -f1
 }
 
+# Display colored padlock logo from header comments
+_logo() {
+    # Extract figlet logo from script header (original lines 3-8, offset by 4 build lines = 7-12)
+    sed -n '7,12s/^# *//p' "$0" 2>/dev/null | while IFS= read -r line; do
+        printf "\033[36m%s\033[0m\n" "$line"
+    done >&2
+    
+    # Add subtitle in dim text
+    printf "\033[2m%s\033[0m\n" "Git Repository Security Orchestrator" >&2
+    echo >&2
+}
+
 _validate_clamp_target() {
     local target_path="$1"
     if ! is_git_repo "$target_path"; then
