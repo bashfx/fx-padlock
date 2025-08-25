@@ -18,13 +18,14 @@ do_clamp() {
                 generate_key=true
                 shift
                 ;;
-            --key) 
+            --key)
+                if [[ $# -lt 2 ]]; then fatal "--key option requires an argument"; fi
                 explicit_key="$2"
                 shift 2
                 ;;
             -K|--ignition)
                 use_ignition=true
-                if [[ -n "$2" && "$2" != -* ]]; then
+                if [[ $# -gt 1 && -n "${2:-}" && "$2" != -* ]]; then
                     ignition_key="$2"
                     shift 2
                 else
@@ -119,13 +120,13 @@ do_clamp() {
     
     # Enhanced crypto setup with master key integration
     if [[ "$use_ignition" == true ]]; then
-        # Generate ignition key if not provided
+        # Generate ignition passphrase if not provided by the user
         if [[ -z "$ignition_key" ]]; then
             ignition_key="$(_generate_ignition_key)"
         fi
         
-        _setup_crypto_with_master "$repo_key_file" "true" "$ignition_key"
-        info "🔥 Ignition mode configured"
+        # Call the new ignition system setup helper
+        _setup_ignition_system "$ignition_key"
         
         # Add to manifest as ignition type
         _add_to_manifest "$REPO_ROOT" "ignition"
@@ -188,8 +189,7 @@ do_status() {
         info "📦 Encrypted size: $size"
         echo
         printf "%bNext steps:%b\n" "$cyan" "$xx"
-        echo "  • Run: source .locked    # Quick unlock"
-        echo "  • Or:  bin/padlock unlock"
+        echo "  • To unlock, run: padlock unlock"
         
     elif [[ -d "$repo_root/.chest" ]]; then
         warn "🗃️  CHEST MODE - Advanced encryption active"
@@ -233,8 +233,8 @@ do_lock() {
     # shellcheck source=/dev/null
     source "$PWD/locker/.padlock"
     
-    if [[ -z "$AGE_RECIPIENTS" ]]; then
-        error "No encryption recipients configured"
+    if [[ -z "${AGE_RECIPIENTS:-}" && -z "${AGE_PASSPHRASE:-}" ]]; then
+        error "No encryption method configured (recipients or passphrase)"
         return 1
     fi
     
@@ -245,31 +245,39 @@ do_lock() {
     file_count=$(find locker -type f | wc -l)
     trace "📁 Files to encrypt: $file_count"
     
-    # Create archive and encrypt
-    if tar -czf - locker | age -r "$AGE_RECIPIENTS" > locker.age; then
+    # Create archive and encrypt to a temporary file
+    local temp_blob="locker.age.tmp"
+    tar -czf - locker | __encrypt_stream > "$temp_blob"
+
+    # Check if encryption was successful before proceeding
+    if [[ $? -eq 0 && -s "$temp_blob" ]]; then
+        # Encryption successful, proceed with replacing old blob and removing plaintext
+        mv "$temp_blob" "locker.age"
         local size
         size=$(du -h locker.age | cut -f1)
         okay "✓ Locked: locker/ → locker.age ($size)"
         
-    # Calculate checksum
-    local checksum
-    checksum=$(find locker -type f -exec md5sum {} \; 2>/dev/null | sort | md5sum | cut -d' ' -f1)
+        # Calculate checksum
+        local checksum
+        checksum=$(find locker -type f -exec md5sum {} \; 2>/dev/null | sort | md5sum | cut -d' ' -f1)
 
-        # Create enhanced .locked script
-    __print_enhanced_locked_file ".locked" "$AGE_KEY_FILE" "$checksum"
+        # Create a simple state file to indicate locked status
+        touch .locked
         
-        # Remove plaintext locker
+        # Remove plaintext locker *after* successful encryption and move
         rm -rf locker
         
-        info "📝 Created .locked script for easy unlocking"
+        info "Repository locked successfully."
         echo
         printf "%bNext steps:%b\n" "$cyan" "$xx"
         echo "  • git add . && git commit"
-        echo "  • To unlock: source .locked"
+        echo "  • To unlock, run: padlock unlock"
         warn "⚠️  Secrets are now encrypted and safe to commit"
         
     else
-        fatal "Failed to encrypt locker directory"
+        # Encryption failed, clean up temporary file and abort
+        rm -f "$temp_blob"
+        fatal "Failed to encrypt locker directory. Plaintext data remains untouched."
     fi
 }
 
@@ -280,51 +288,51 @@ do_unlock() {
         info "Repository may already be unlocked"
         return 1
     fi
-    
+
     if [[ -d "locker" ]]; then
         warn "Locker directory already exists"
         info "Repository appears to be unlocked"
         return 0
     fi
-    
-    # Check for configuration
-    if [[ -z "$AGE_KEY_FILE" && -z "$AGE_RECIPIENTS" ]]; then
-        error "No decryption key configured"
-        info "Set AGE_KEY_FILE environment variable"
-        return 1
+
+    # Determine key file path, preferring env var if set, otherwise derive it
+    local key_file="${AGE_KEY_FILE:-}"
+    if [[ -z "$key_file" ]]; then
+        local repo_root
+        repo_root=$(_get_repo_root .)
+        key_file="$PADLOCK_KEYS/$(basename "$repo_root").key"
+
+        if [[ ! -f "$key_file" ]]; then
+            error "Could not find default decryption key for this repository."
+            info "Looked for key at: $key_file"
+            info "You can also set the AGE_KEY_FILE environment variable manually."
+            return 1
+        fi
+        trace "Using derived repository key: $key_file"
+    else
+        trace "Using key from AGE_KEY_FILE env var: $key_file"
     fi
-    
+
     lock "🔓 Decrypting locker.age..."
-    
-    # Decrypt and extract
-    local decrypt_cmd="age -d"
-    if [[ -n "$AGE_KEY_FILE" ]]; then
-        decrypt_cmd="$decrypt_cmd -i $AGE_KEY_FILE"
-    fi
-    
-    if $decrypt_cmd < locker.age | tar -xzf -; then
+
+    # Decrypt and extract using the determined key file
+    if age -d -i "$key_file" < locker.age | tar -xzf -; then
         local file_count
         file_count=$(find locker -type f | wc -l)
         okay "✓ Unlocked: locker.age → locker/ ($file_count files)"
-        
-        # Clean up encrypted files
+
+        # Clean up encrypted file and state indicator
         rm -f locker.age .locked
-        
-        # Load environment if config exists
-        if [[ -f "locker/.padlock" ]]; then
-            # shellcheck source=/dev/null
-            source locker/.padlock
-            info "📝 Environment loaded - crypto config active"
-        fi
-        
+
+        info "Repository unlocked successfully. Your shell session is not affected."
         echo
         printf "%bNext steps:%b\n" "$cyan" "$xx"
-        echo "  • Edit files in locker/"
-        echo "  • Commit changes when ready"
-        warn "⚠️  Secrets are now in plaintext - DO NOT commit locker/"
-        
+        echo "  • Edit files in the 'locker' directory."
+        echo "  • Run 'git commit' to auto-lock when done."
+        warn "⚠️  Secrets are now in plaintext. The 'locker/' directory is in .gitignore."
+
     else
-        fatal "Failed to decrypt locker.age"
+        fatal "Failed to decrypt locker.age. Check your key permissions or repository state."
     fi
 }
 
@@ -400,33 +408,116 @@ do_master_unlock() {
     warn "⚠️  Secrets are now in plaintext - DO NOT commit locker/"
 }
 
+_master_unlock() {
+    # Check if the global key exists
+    if [[ ! -f "$PADLOCK_GLOBAL_KEY" ]]; then
+        error "Master key not found at: $PADLOCK_GLOBAL_KEY"
+        info "This key is usually generated automatically on first install."
+        info "Try running 'padlock install' to generate it."
+        return 1
+    fi
+
+    # Early validation for locker.age
+    if [[ ! -f "locker.age" ]]; then
+        error "No encrypted locker found (locker.age missing)."
+        info "Cannot perform master unlock without locker.age."
+        return 1
+    fi
+
+    # Use the global key for decryption by setting AGE_KEY_FILE for __decrypt_stream
+    export AGE_KEY_FILE="$PADLOCK_GLOBAL_KEY"
+
+    info "Attempting decryption with master key..."
+    if __decrypt_stream < locker.age | tar -xzf -; then
+        rm -f locker.age .locked
+        info "Successfully unlocked with master key."
+        unset AGE_KEY_FILE
+        return 0
+    else
+        error "Failed to decrypt locker.age with master key."
+        unset AGE_KEY_FILE
+        return 1
+    fi
+}
+
+# Placeholders for unimplemented ignition features
+_ignition_lock() {
+    error "Ignition lock feature not implemented."
+    return 1
+}
+_chest_status() {
+    error "Chest status feature not implemented."
+    return 1
+}
+
+_ignition_unlock() {
+    if [[ -z "${PADLOCK_IGNITION_PASS:-}" ]]; then
+        error "Ignition key not found in environment variable PADLOCK_IGNITION_PASS."
+        return 1
+    fi
+
+    if [[ ! -f "locker.age" ]]; then
+        error "No encrypted locker found (locker.age missing)."
+        return 1
+    fi
+
+    # Use the ignition pass as the age passphrase for decryption
+    export AGE_PASSPHRASE="$PADLOCK_IGNITION_PASS"
+
+    if __decrypt_stream < locker.age | tar -xzf -; then
+        rm -f locker.age .locked
+        return 0
+    else
+        error "Failed to decrypt locker.age with ignition key."
+        return 1
+    fi
+}
+
 # Ignition unlock command
 do_ignite() {
     local action="$1"
     
+    # Set REPO_ROOT for the helpers, as this is a top-level command.
+    REPO_ROOT=$(_get_repo_root .)
+
     case "$action" in
         --unlock|-u)
-            lock "🔥 Unlocking with ignition key..."
-            if ! _ignition_unlock; then
-                return 1
-            fi
-            okay "✓ Chest unlocked with ignition key"
-            info "🔓 Locker is now accessible"
+            _unlock_chest
             ;;
         --lock|-l)
-            lock "🔥 Securing locker in chest..."
-            if ! _ignition_lock; then
-                return 1
-            fi
-            okay "✓ Locker secured in chest"
-            info "🔒 Locker is now encrypted"
+            _lock_chest
             ;;
         --status|-s)
-            _chest_status
+            # Simple status for now, can be enhanced later.
+            if [[ -d "$REPO_ROOT/.chest" ]]; then
+                info "Chest is LOCKED."
+            elif [[ -d "$REPO_ROOT/locker" ]]; then
+                info "Chest is UNLOCKED."
+            else
+                info "Chest status is unknown (not an ignition repo?)."
+            fi
             ;;
         *)
             error "Unknown ignition action: $action"
             info "Available actions: --unlock, --lock, --status"
+            return 1
+            ;;
+    esac
+}
+
+do_rotate() {
+    local target="$1"
+
+    # Set REPO_ROOT for the helpers
+    REPO_ROOT=$(_get_repo_root .)
+
+    case "$target" in
+        -K|--ignition)
+            _rotate_ignition_key
+            ;;
+        *)
+            error "Unknown target for rotate: $target"
+            info "Usage: padlock rotate --ignition"
             return 1
             ;;
     esac
