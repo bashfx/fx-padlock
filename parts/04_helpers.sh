@@ -331,7 +331,7 @@ _unlock_chest() {
     # 1. Decrypt the ignition key into a temporary file.
     local temp_ignition_key
     temp_ignition_key=$(mktemp)
-    trap 'trace "Cleaning up temp key file..."; rm -f "$temp_ignition_key"' RETURN
+    trap "trace 'Cleaning up temp key file...'; rm -f -- '$temp_ignition_key'" RETURN
 
     AGE_PASSPHRASE="${PADLOCK_IGNITION_PASS}" age -d < "$encrypted_ignition_key_blob" > "$temp_ignition_key"
     if [[ $? -ne 0 || ! -s "$temp_ignition_key" ]]; then
@@ -424,7 +424,7 @@ _rotate_ignition_key() {
     # Decrypt the key with the old passphrase
     local temp_ignition_key
     temp_ignition_key=$(mktemp)
-    trap 'rm -f "$temp_ignition_key"' RETURN
+    trap "rm -f -- '$temp_ignition_key'" RETURN
 
     AGE_PASSPHRASE="$old_passphrase" age -d < "$encrypted_ignition_key_blob" > "$temp_ignition_key"
     if [[ $? -ne 0 || ! -s "$temp_ignition_key" ]]; then
