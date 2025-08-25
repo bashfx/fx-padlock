@@ -48,6 +48,15 @@ dispatch() {
         declamp)
             do_declamp "$@"
             ;;
+        map)
+            do_map "$@"
+            ;;
+        path)
+            do_path "$@"
+            ;;
+        remote)
+            do_remote "$@"
+            ;;
         revoke)
             do_revoke "$@"
             ;;
@@ -142,6 +151,10 @@ COMMANDS:
 
 
     Advanced:
+    map <path>      Map additional files/dirs for inclusion in chest
+      add|remove    Add or remove path from mappings (default: add)
+    path [repo]     Show computed storage paths for keys and artifacts
+    remote [repo]   Update artifacts for remote namespace (after adding git remote)
     overdrive       Engage overdrive mode (encrypts entire repo)
     declamp         Remove padlock from a repository
     revoke          Revoke encryption access (removes keys and forces re-key)

@@ -146,6 +146,9 @@ do_clamp() {
     __print_security_readme "$REPO_ROOT/SECURITY.md"
     trace "Created starter files"
     
+    # Backup critical artifacts
+    _backup_repo_artifacts "$REPO_ROOT"
+    
     # Final success message
     okay "✓ Padlock deployed successfully"
     
@@ -433,6 +436,188 @@ do_list() {
     esac
 }
 
+# Backup critical repository artifacts
+_backup_repo_artifacts() {
+    local repo_path="$1"
+    local repo_name=$(basename "$repo_path")
+    
+    # Determine namespace from git remote or use 'local'
+    local namespace="local"
+    if [[ -d "$repo_path/.git" ]]; then
+        local remote_url
+        remote_url=$(git -C "$repo_path" remote get-url origin 2>/dev/null || echo "")
+        if [[ -n "$remote_url" ]]; then
+            # Parse remote URL to extract host, user, and repo
+            local host user_repo
+            if [[ "$remote_url" =~ ^https?://([^/]+)/([^/]+)/([^/]+) ]]; then
+                # HTTPS: https://github.com/user/repo.git
+                host="${BASH_REMATCH[1]}"
+                user_repo="${BASH_REMATCH[2]}/${BASH_REMATCH[3]%.git}"
+            elif [[ "$remote_url" =~ ^[^@]+@([^:]+):([^/]+)/([^/]+) ]]; then
+                # SSH: git@github.com:user/repo.git
+                host="${BASH_REMATCH[1]}"
+                user_repo="${BASH_REMATCH[2]}/${BASH_REMATCH[3]%.git}"
+            else
+                # Fallback for unusual formats
+                host="unknown"
+                user_repo=$(basename "$repo_path")
+            fi
+            
+            # Create namespace as host, repo as user/repo to avoid collisions
+            namespace="$host"
+            repo_name="$user_repo"
+        fi
+    fi
+    
+    local backup_dir="$PADLOCK_ETC/repos/$namespace/$repo_name"
+    
+    mkdir -p "$backup_dir"
+    
+    local artifacts_backed_up=0
+    
+    # Backup padlock.map if it exists
+    if [[ -f "$repo_path/padlock.map" ]]; then
+        cp "$repo_path/padlock.map" "$backup_dir/padlock.map"
+        ((artifacts_backed_up++))
+        trace "Backed up padlock.map"
+    fi
+    
+    # Backup .gitattributes (padlock-specific parts)
+    if [[ -f "$repo_path/.gitattributes" ]]; then
+        grep -E "(locker\.age|filter=locker-crypt|bin/\*|\.githooks/\*)" "$repo_path/.gitattributes" > "$backup_dir/.gitattributes" 2>/dev/null || true
+        if [[ -s "$backup_dir/.gitattributes" ]]; then
+            ((artifacts_backed_up++))
+            trace "Backed up .gitattributes (padlock sections)"
+        else
+            rm -f "$backup_dir/.gitattributes"
+        fi
+    fi
+    
+    # Backup padlock-specific .gitignore sections
+    if [[ -f "$repo_path/.gitignore" ]]; then
+        grep -A5 -B1 "# Padlock" "$repo_path/.gitignore" > "$backup_dir/.gitignore" 2>/dev/null || true
+        if [[ -s "$backup_dir/.gitignore" ]]; then
+            ((artifacts_backed_up++))
+            trace "Backed up .gitignore (padlock sections)"
+        else
+            rm -f "$backup_dir/.gitignore"
+        fi
+    fi
+    
+    # Create artifact metadata
+    if [[ $artifacts_backed_up -gt 0 ]]; then
+        cat > "$backup_dir/.artifact_info" << EOF
+# Padlock Repository Artifacts Backup
+# Repository: $repo_name
+# Path: $repo_path
+# Backed up: $(date -Iseconds)
+# Artifacts: $artifacts_backed_up
+
+artifacts_count=$artifacts_backed_up
+repo_path=$repo_path
+backup_date=$(date -Iseconds)
+EOF
+        trace "Artifact backup complete: $artifacts_backed_up items"
+    else
+        # Remove empty backup directory
+        rmdir "$backup_dir" 2>/dev/null || true
+    fi
+    
+    return 0
+}
+
+# Restore critical repository artifacts
+_restore_repo_artifacts() {
+    local repo_path="$1"
+    local repo_name=$(basename "$repo_path")
+    
+    # Determine namespace from git remote or use 'local'
+    local namespace="local"
+    if [[ -d "$repo_path/.git" ]]; then
+        local remote_url
+        remote_url=$(git -C "$repo_path" remote get-url origin 2>/dev/null || echo "")
+        if [[ -n "$remote_url" ]]; then
+            # Parse remote URL to extract host, user, and repo
+            local host user_repo
+            if [[ "$remote_url" =~ ^https?://([^/]+)/([^/]+)/([^/]+) ]]; then
+                # HTTPS: https://github.com/user/repo.git
+                host="${BASH_REMATCH[1]}"
+                user_repo="${BASH_REMATCH[2]}/${BASH_REMATCH[3]%.git}"
+            elif [[ "$remote_url" =~ ^[^@]+@([^:]+):([^/]+)/([^/]+) ]]; then
+                # SSH: git@github.com:user/repo.git
+                host="${BASH_REMATCH[1]}"
+                user_repo="${BASH_REMATCH[2]}/${BASH_REMATCH[3]%.git}"
+            else
+                # Fallback for unusual formats
+                host="unknown"
+                user_repo=$(basename "$repo_path")
+            fi
+            
+            # Create namespace as host, repo as user/repo to avoid collisions
+            namespace="$host"
+            repo_name="$user_repo"
+        fi
+    fi
+    
+    local backup_dir="$PADLOCK_ETC/repos/$namespace/$repo_name"
+    
+    if [[ ! -d "$backup_dir" ]]; then
+        return 1  # No artifacts backed up
+    fi
+    
+    local artifacts_restored=0
+    
+    info "🔧 Restoring backed up artifacts..."
+    
+    # Restore padlock.map
+    if [[ -f "$backup_dir/padlock.map" && ! -f "$repo_path/padlock.map" ]]; then
+        cp "$backup_dir/padlock.map" "$repo_path/padlock.map"
+        ((artifacts_restored++))
+        okay "✓ Restored padlock.map"
+    fi
+    
+    # Restore .gitattributes (merge approach)
+    if [[ -f "$backup_dir/.gitattributes" ]]; then
+        if [[ ! -f "$repo_path/.gitattributes" ]]; then
+            cp "$backup_dir/.gitattributes" "$repo_path/.gitattributes"
+            ((artifacts_restored++))
+            okay "✓ Restored .gitattributes"
+        else
+            # Check if padlock sections are missing and add them
+            if ! grep -q "locker.age" "$repo_path/.gitattributes" 2>/dev/null; then
+                echo "" >> "$repo_path/.gitattributes"
+                cat "$backup_dir/.gitattributes" >> "$repo_path/.gitattributes"
+                ((artifacts_restored++))
+                okay "✓ Merged padlock sections into .gitattributes"
+            fi
+        fi
+    fi
+    
+    # Restore .gitignore (merge approach)
+    if [[ -f "$backup_dir/.gitignore" ]]; then
+        if [[ ! -f "$repo_path/.gitignore" ]]; then
+            cp "$backup_dir/.gitignore" "$repo_path/.gitignore"
+            ((artifacts_restored++))
+            okay "✓ Restored .gitignore"
+        else
+            # Check if padlock sections are missing and add them
+            if ! grep -q "# Padlock" "$repo_path/.gitignore" 2>/dev/null; then
+                echo "" >> "$repo_path/.gitignore"
+                cat "$backup_dir/.gitignore" >> "$repo_path/.gitignore"
+                ((artifacts_restored++))
+                okay "✓ Merged padlock sections into .gitignore"
+            fi
+        fi
+    fi
+    
+    if [[ $artifacts_restored -gt 0 ]]; then
+        info "📁 Restored $artifacts_restored artifacts from backup"
+        return 0
+    else
+        return 1
+    fi
+}
+
 # Enhanced manifest management
 _add_to_manifest() {
     local repo_path="$1"
@@ -541,12 +726,91 @@ _master_unlock() {
 
 # Placeholders for unimplemented ignition features
 _ignition_lock() {
-    error "Ignition lock feature not implemented."
-    return 1
+    local repo_root="$(_get_repo_root .)"
+    
+    # Check if we have a locker to lock
+    if [[ ! -d "$repo_root/locker" ]]; then
+        error "No locker directory found"
+        info "Repository may already be locked"
+        return 1
+    fi
+    
+    # Check if we're in chest mode
+    if [[ ! -d "$repo_root/.chest" ]]; then
+        error "Repository is not in chest mode"
+        info "Use 'padlock ignite --status' to check current state"
+        return 1
+    fi
+    
+    lock "🗃️  Locking locker into chest..."
+    
+    # Use the existing _lock_chest helper which does the actual work
+    if _lock_chest; then
+        okay "✓ Locker secured in chest"
+        info "🔥 Ignition key required for unlock"
+        echo
+        printf "%bNext steps:%b\n" "$cyan" "$xx"
+        echo "  • git add . && git commit"
+        echo "  • To unlock: padlock ignite --unlock"
+        warn "⚠️  Chest is now locked and safe to commit"
+        return 0
+    else
+        error "Failed to lock locker into chest"
+        return 1
+    fi
 }
 _chest_status() {
-    error "Chest status feature not implemented."
-    return 1
+    local repo_root="$(_get_repo_root .)"
+    
+    if [[ ! -d "$repo_root/.chest" ]]; then
+        error "Repository is not in chest mode"
+        info "This repository uses standard locker encryption"
+        return 1
+    fi
+    
+    info "=== Chest Status ==="
+    
+    local chest_blob="$repo_root/.chest/locker.age"
+    local ignition_blob="$repo_root/.chest/ignition.age"
+    
+    if [[ -f "$chest_blob" && -f "$ignition_blob" ]]; then
+        local size
+        size=$(du -h "$chest_blob" 2>/dev/null | cut -f1)
+        warn "🗃️  CHEST LOCKED"
+        info "Encrypted locker: $size"
+        info "Ignition key: protected"
+        echo
+        printf "%bNext steps:%b\n" "$cyan" "$xx"
+        echo "  • To unlock: padlock ignite --unlock"
+        echo "  • Set ignition key: export PADLOCK_IGNITION_PASS='your-key'"
+        
+    elif [[ -d "$repo_root/locker" ]]; then
+        okay "🔓 CHEST UNLOCKED"
+        local file_count
+        file_count=$(find "$repo_root/locker" -type f | wc -l)
+        info "Files accessible: $file_count"
+        echo
+        printf "%bNext steps:%b\n" "$cyan" "$xx"
+        echo "  • Edit files in locker/"
+        echo "  • To lock: padlock ignite --lock"
+        echo "  • Manual commit locks automatically"
+        
+    else
+        error "🔧 CHEST CORRUPTED"
+        warn "Neither locked chest nor unlocked locker found"
+        echo
+        printf "%bNext steps:%b\n" "$cyan" "$xx"
+        echo "  • Try: padlock repair"
+        echo "  • Check ignition key: PADLOCK_IGNITION_PASS"
+        echo "  • Or convert: padlock revoke --ignition"
+    fi
+    
+    # Show chest contents if accessible
+    if [[ -d "$repo_root/.chest" ]]; then
+        local chest_items
+        chest_items=$(find "$repo_root/.chest" -type f 2>/dev/null | wc -l)
+        trace "🗃️  Chest items: $chest_items"
+    fi
 }
 
 _ignition_unlock() {
@@ -587,14 +851,7 @@ do_ignite() {
             _lock_chest
             ;;
         --status|-s)
-            # Simple status for now, can be enhanced later.
-            if [[ -d "$REPO_ROOT/.chest" ]]; then
-                info "Chest is LOCKED."
-            elif [[ -d "$REPO_ROOT/locker" ]]; then
-                info "Chest is UNLOCKED."
-            else
-                info "Chest status is unknown (not an ignition repo?)."
-            fi
+            _chest_status
             ;;
         *)
             error "Unknown ignition action: $action"
@@ -663,9 +920,14 @@ do_export() {
     local export_manifest="$temp_dir/manifest.txt"
     local keys_dir="$temp_dir/keys"
 
-    # Copy manifest and keys to a temporary location
+    # Copy manifest, keys, and repo artifacts to a temporary location
     cp "$PADLOCK_ETC/manifest.txt" "$export_manifest"
     cp -r "$PADLOCK_KEYS" "$keys_dir"
+    
+    # Copy repo artifacts if they exist
+    if [[ -d "$PADLOCK_ETC/repos" ]]; then
+        cp -r "$PADLOCK_ETC/repos" "$temp_dir/repos"
+    fi
 
     # Create metadata file
     cat > "$temp_dir/export_info.json" << EOF
@@ -767,14 +1029,24 @@ do_import() {
             warn "Replacing current padlock environment."
             rm -f "$PADLOCK_ETC/manifest.txt"
             rm -rf "$PADLOCK_KEYS"
+            rm -rf "$PADLOCK_ETC/repos"
             mkdir -p "$PADLOCK_KEYS"
             cp "$temp_dir/manifest.txt" "$PADLOCK_ETC/manifest.txt"
             cp -r "$temp_dir/keys"/* "$PADLOCK_KEYS/"
+            # Restore repo artifacts if they exist in the import
+            if [[ -d "$temp_dir/repos" ]]; then
+                cp -r "$temp_dir/repos" "$PADLOCK_ETC/repos"
+            fi
             ;;
         --merge)
             info "Merging with current environment."
             _merge_manifests "$temp_dir/manifest.txt" "$PADLOCK_ETC/manifest.txt"
             cp -rT "$temp_dir/keys" "$PADLOCK_KEYS" 2>/dev/null || true
+            # Restore repo artifacts if they exist in the import
+            if [[ -d "$temp_dir/repos" ]]; then
+                mkdir -p "$PADLOCK_ETC/repos"
+                cp -rT "$temp_dir/repos" "$PADLOCK_ETC/repos" 2>/dev/null || true
+            fi
             ;;
         *)
             fatal "Unknown import mode: $merge_mode. Use --merge or --replace."
@@ -804,6 +1076,11 @@ do_snapshot() {
 
     cp "$PADLOCK_ETC/manifest.txt" "$temp_dir/manifest.txt"
     cp -r "$PADLOCK_KEYS" "$temp_dir/keys"
+    
+    # Include repo artifacts in snapshot
+    if [[ -d "$PADLOCK_ETC/repos" ]]; then
+        cp -r "$PADLOCK_ETC/repos" "$temp_dir/repos"
+    fi
 
     tar -C "$temp_dir" -czf - . | AGE_PASSPHRASE="$snapshot_pass" age -p > "$export_file"
     if [[ $? -ne 0 ]]; then
@@ -1311,6 +1588,50 @@ do_repair() {
         fi
     fi
     
+    # Try to restore any missing artifacts
+    if _restore_repo_artifacts "$repo_path"; then
+        info "🔧 Additional artifacts restored from backup"
+    else
+        # Check if artifacts exist in local namespace (migration scenario)
+        local repo_name=$(basename "$repo_path")
+        local namespace="local"
+        if [[ -d "$repo_path/.git" ]]; then
+            local remote_url
+            remote_url=$(git -C "$repo_path" remote get-url origin 2>/dev/null || echo "")
+            if [[ -n "$remote_url" ]]; then
+                # Parse remote URL to determine current namespace
+                local host user_repo
+                if [[ "$remote_url" =~ ^https?://([^/]+)/([^/]+)/([^/]+) ]]; then
+                    host="${BASH_REMATCH[1]}"
+                    user_repo="${BASH_REMATCH[2]}/${BASH_REMATCH[3]%.git}"
+                elif [[ "$remote_url" =~ ^[^@]+@([^:]+):([^/]+)/([^/]+) ]]; then
+                    host="${BASH_REMATCH[1]}"
+                    user_repo="${BASH_REMATCH[2]}/${BASH_REMATCH[3]%.git}"
+                else
+                    host="unknown"
+                    user_repo=$(basename "$repo_path")
+                fi
+                namespace="$host"
+                repo_name="$user_repo"
+            fi
+        fi
+        
+        # If current namespace is not 'local', check for orphaned local artifacts
+        if [[ "$namespace" != "local" ]]; then
+            local local_artifacts_dir="$PADLOCK_ETC/repos/local/$(basename "$repo_path")"
+            local current_artifacts_dir="$PADLOCK_ETC/repos/$namespace/$repo_name"
+            if [[ -d "$local_artifacts_dir" && ! -d "$current_artifacts_dir" ]]; then
+                info "🚨 Found orphaned artifacts in local namespace"
+                info "Migrating from local to current namespace..."
+                if _migrate_artifacts_namespace "$local_artifacts_dir" "$current_artifacts_dir"; then
+                    okay "✓ Migrated orphaned artifacts"
+                    rm -rf "$local_artifacts_dir"
+                    _restore_repo_artifacts "$repo_path"  # Try restore again
+                fi
+            fi
+        fi
+    fi
+    
     echo
     okay "✓ Repair completed successfully"
     info "Repository should now be functional."
@@ -1498,6 +1819,378 @@ do_declamp() {
 }
 
 # Revocation operations - remove access to encrypted content
+do_map() {
+    local src_path="${1:-}"
+    local action="${2:-add}"
+    
+    local repo_root="$(_get_repo_root .)"
+    local map_file="$repo_root/padlock.map"
+    
+    if [[ -z "$src_path" ]]; then
+        # Show current mappings
+        if [[ -f "$map_file" ]]; then
+            info "📋 Current file mappings:"
+            echo
+            while IFS='|' read -r src_rel dest_rel; do
+                # Skip comments and empty lines
+                [[ "$src_rel" =~ ^[[:space:]]*# ]] && continue
+                [[ -z "$src_rel" ]] && continue
+                
+                local src_abs="$repo_root/$src_rel"
+                local status="❓"
+                
+                if [[ -f "$src_abs" ]]; then
+                    status="✓"
+                elif [[ -d "$src_abs" ]]; then
+                    status="📁"
+                else
+                    status="❌"
+                fi
+                
+                printf "  %s %s\n" "$status" "$src_rel"
+            done < "$map_file"
+            echo
+            info "Usage: padlock map <file|dir> [add|remove]"
+        else
+            info "No mappings defined. Use: padlock map <file|dir>"
+        fi
+        return 0
+    fi
+    
+    # Normalize source path
+    if [[ "$src_path" = /* ]]; then
+        # Absolute path - convert to relative from repo root
+        src_path="$(realpath --relative-to="$repo_root" "$src_path")"
+    else
+        # Relative path - ensure it exists
+        src_path="$(realpath --relative-to="$repo_root" "$repo_root/$src_path")"
+    fi
+    
+    # Validate source exists
+    local src_abs="$repo_root/$src_path"
+    if [[ ! -e "$src_abs" ]]; then
+        error "Source not found: $src_path"
+        return 1
+    fi
+    
+    # Prevent mapping files already in locker/
+    if [[ "$src_path" == locker/* ]]; then
+        error "Files in locker/ are automatically included"
+        info "Map command is for files outside the locker/"
+        return 1
+    fi
+    
+    # Prevent mapping sensitive padlock files
+    case "$src_path" in
+        .git/*|bin/*|.githooks/*|locker.age|.locked|.chest/*|super_chest.age|.overdrive|padlock.map)
+            error "Cannot map padlock infrastructure files"
+            return 1
+            ;;
+    esac
+    
+    case "$action" in
+        add)
+            # Create map file if it doesn't exist
+            if [[ ! -f "$map_file" ]]; then
+                cat > "$map_file" << 'EOF'
+# Padlock File Mapping
+# Format: source_path|destination_path
+# Paths are relative to repository root
+# Files listed here will be included in encrypted chest
+EOF
+            fi
+            
+            # Check if already mapped
+            if grep -q "^$src_path|" "$map_file" 2>/dev/null; then
+                warn "Already mapped: $src_path"
+                return 0
+            fi
+            
+            # Add mapping (destination same as source for now)
+            echo "$src_path|$src_path" >> "$map_file"
+            
+            # Backup the updated map file
+            _backup_repo_artifacts "$repo_root"
+            
+            if [[ -f "$src_abs" ]]; then
+                okay "✓ Mapped file: $src_path"
+            elif [[ -d "$src_abs" ]]; then
+                okay "✓ Mapped directory: $src_path"
+                local file_count
+                file_count=$(find "$src_abs" -type f | wc -l)
+                info "📁 Contains $file_count files"
+            fi
+            ;;
+            
+        remove)
+            if [[ ! -f "$map_file" ]]; then
+                error "No mappings file found"
+                return 1
+            fi
+            
+            if ! grep -q "^$src_path|" "$map_file"; then
+                error "Not mapped: $src_path"
+                return 1
+            fi
+            
+            # Remove the mapping
+            local temp_file
+            temp_file=$(mktemp)
+            grep -v "^$src_path|" "$map_file" > "$temp_file"
+            mv "$temp_file" "$map_file"
+            
+            # Backup the updated map file
+            _backup_repo_artifacts "$repo_root"
+            
+            okay "✓ Unmapped: $src_path"
+            ;;
+            
+        *)
+            error "Unknown action: $action"
+            info "Available actions: add, remove"
+            return 1
+            ;;
+    esac
+    
+    info "💡 Changes take effect on next lock operation"
+}
+
+do_path() {
+    local repo_path="${1:-.}"
+    repo_path="$(realpath "$repo_path")"
+    
+    local repo_name=$(basename "$repo_path")
+    
+    # Determine namespace from git remote or use 'local'
+    local namespace="local"
+    if [[ -d "$repo_path/.git" ]]; then
+        local remote_url
+        remote_url=$(git -C "$repo_path" remote get-url origin 2>/dev/null || echo "")
+        if [[ -n "$remote_url" ]]; then
+            # Parse remote URL to extract host, user, and repo
+            local host user_repo
+            if [[ "$remote_url" =~ ^https?://([^/]+)/([^/]+)/([^/]+) ]]; then
+                # HTTPS: https://github.com/user/repo.git
+                host="${BASH_REMATCH[1]}"
+                user_repo="${BASH_REMATCH[2]}/${BASH_REMATCH[3]%.git}"
+            elif [[ "$remote_url" =~ ^[^@]+@([^:]+):([^/]+)/([^/]+) ]]; then
+                # SSH: git@github.com:user/repo.git
+                host="${BASH_REMATCH[1]}"
+                user_repo="${BASH_REMATCH[2]}/${BASH_REMATCH[3]%.git}"
+            else
+                # Fallback for unusual formats
+                host="unknown"
+                user_repo=$(basename "$repo_path")
+            fi
+            
+            # Create namespace as host, repo as user/repo to avoid collisions
+            namespace="$host"
+            repo_name="$user_repo"
+        fi
+    fi
+    
+    info "📍 Repository path analysis for: $repo_path"
+    echo
+    
+    if [[ -d "$repo_path/.git" ]]; then
+        local remote_url
+        remote_url=$(git -C "$repo_path" remote get-url origin 2>/dev/null || echo "")
+        if [[ -n "$remote_url" ]]; then
+            info "🔗 Git remote: $remote_url"
+        else
+            info "🔗 Git remote: (none - local repository)"
+        fi
+    else
+        info "🔗 Git remote: (not a git repository)"
+    fi
+    
+    echo
+    info "📋 Computed storage paths:"
+    printf "  Namespace: %b%s%b\n" "$cyan" "$namespace" "$xx"
+    printf "  Repository: %b%s%b\n" "$cyan" "$repo_name" "$xx"
+    echo
+    printf "  Key file: %b%s%b\n" "$green" "$PADLOCK_KEYS/$(basename "$repo_path").key" "$xx"
+    printf "  Artifacts: %b%s%b\n" "$green" "$PADLOCK_ETC/repos/$namespace/$repo_name/" "$xx"
+    echo
+    
+    # Show what artifacts exist
+    local artifacts_dir="$PADLOCK_ETC/repos/$namespace/$repo_name"
+    local key_file="$PADLOCK_KEYS/$(basename "$repo_path").key"
+    
+    info "📁 Current storage status:"
+    if [[ -f "$key_file" ]]; then
+        printf "  ✓ Key file exists: %s\n" "$(basename "$key_file")"
+    else
+        printf "  ✗ Key file missing: %s\n" "$(basename "$key_file")"
+    fi
+    
+    if [[ -d "$artifacts_dir" ]]; then
+        local artifact_count
+        artifact_count=$(find "$artifacts_dir" -type f | wc -l)
+        printf "  ✓ Artifacts backed up: %d files\n" "$artifact_count"
+        
+        # List specific artifacts
+        if [[ -f "$artifacts_dir/.artifact_info" ]]; then
+            local backup_date
+            backup_date=$(grep "backup_date=" "$artifacts_dir/.artifact_info" 2>/dev/null | cut -d'=' -f2 || echo "unknown")
+            printf "  📅 Last backup: %s\n" "$backup_date"
+        fi
+        
+        echo "  📄 Artifacts:"
+        find "$artifacts_dir" -type f -not -name ".artifact_info" | while read -r file; do
+            printf "    • %s\n" "$(basename "$file")"
+        done
+    else
+        printf "  ✗ No artifacts backed up\n"
+        
+        # Check if artifacts exist in the 'local' namespace (migration scenario) - just show info
+        if [[ "$namespace" != "local" ]]; then
+            local local_artifacts_dir="$PADLOCK_ETC/repos/local/$(basename "$repo_path")"
+            if [[ -d "$local_artifacts_dir" ]]; then
+                echo
+                warn "🚨 Migration available!"
+                info "Found artifacts in local namespace that can be migrated:"
+                printf "  From: %b%s%b\n" "$yellow" "$local_artifacts_dir" "$xx"
+                printf "  To:   %b%s%b\n" "$green" "$artifacts_dir" "$xx"
+                echo
+                printf "  Run: %bpadlock remote%b to update for remote namespace\n" "$green" "$xx"
+            fi
+        fi
+    fi
+}
+
+# Helper function to migrate artifacts between namespaces
+_migrate_artifacts_namespace() {
+    local old_dir="$1"
+    local new_dir="$2"
+    
+    if [[ ! -d "$old_dir" ]]; then
+        return 1
+    fi
+    
+    mkdir -p "$new_dir"
+    
+    # Copy all files except .artifact_info (will be regenerated)
+    if find "$old_dir" -type f -not -name ".artifact_info" -exec cp {} "$new_dir/" \; 2>/dev/null; then
+        # Update the artifact info with new location
+        if [[ -f "$old_dir/.artifact_info" ]]; then
+            sed "s|repo_path=.*|repo_path=$(dirname "$new_dir")|" "$old_dir/.artifact_info" > "$new_dir/.artifact_info"
+        fi
+        return 0
+    else
+        return 1
+    fi
+}
+
+do_remote() {
+    local repo_path="${1:-.}"
+    repo_path="$(realpath "$repo_path")"
+    
+    info "🔗 Padlock Remote Update"
+    echo
+    
+    local repo_name=$(basename "$repo_path")
+    local namespace="local"
+    local old_artifacts_dir=""
+    local new_artifacts_dir=""
+    
+    # Determine current namespace from git remote
+    if [[ -d "$repo_path/.git" ]]; then
+        local remote_url
+        remote_url=$(git -C "$repo_path" remote get-url origin 2>/dev/null || echo "")
+        if [[ -n "$remote_url" ]]; then
+            # Parse remote URL to extract host, user, and repo
+            local host user_repo
+            if [[ "$remote_url" =~ ^https?://([^/]+)/([^/]+)/([^/]+) ]]; then
+                # HTTPS: https://github.com/user/repo.git
+                host="${BASH_REMATCH[1]}"
+                user_repo="${BASH_REMATCH[2]}/${BASH_REMATCH[3]%.git}"
+            elif [[ "$remote_url" =~ ^[^@]+@([^:]+):([^/]+)/([^/]+) ]]; then
+                # SSH: git@github.com:user/repo.git
+                host="${BASH_REMATCH[1]}"
+                user_repo="${BASH_REMATCH[2]}/${BASH_REMATCH[3]%.git}"
+            else
+                # Fallback for unusual formats
+                host="unknown"
+                user_repo=$(basename "$repo_path")
+            fi
+            
+            # Create namespace as host, repo as user/repo
+            namespace="$host"
+            repo_name="$user_repo"
+        fi
+    fi
+    
+    # Check what migrations are available
+    old_artifacts_dir="$PADLOCK_ETC/repos/local/$(basename "$repo_path")"
+    new_artifacts_dir="$PADLOCK_ETC/repos/$namespace/$repo_name"
+    
+    # If we're already in the correct namespace, nothing to do
+    if [[ "$namespace" == "local" ]]; then
+        okay "✓ Repository has no remote - using local namespace"
+        return 0
+    fi
+    
+    # Check if new location already has artifacts
+    if [[ -d "$new_artifacts_dir" ]]; then
+        okay "✓ Artifacts already updated for remote namespace"
+        info "Current location: $new_artifacts_dir"
+        return 0
+    fi
+    
+    # Check if old artifacts exist to update
+    if [[ ! -d "$old_artifacts_dir" ]]; then
+        warn "⚠️  No artifacts found in local namespace to update"
+        info "Expected old location: $old_artifacts_dir"
+        info "Target location: $new_artifacts_dir"
+        return 1
+    fi
+    
+    # Show what will be migrated
+    if [[ -d "$repo_path/.git" ]]; then
+        local remote_url
+        remote_url=$(git -C "$repo_path" remote get-url origin 2>/dev/null || echo "")
+        info "🔗 Git remote: $remote_url"
+    fi
+    
+    echo
+    info "📋 Update plan:"
+    printf "  From: %b%s%b\n" "$yellow" "$old_artifacts_dir" "$xx"
+    printf "  To:   %b%s%b\n" "$green" "$new_artifacts_dir" "$xx"
+    
+    # Show what artifacts will be moved
+    local artifact_count
+    artifact_count=$(find "$old_artifacts_dir" -type f -not -name ".artifact_info" | wc -l)
+    echo
+    info "📁 Artifacts to update:"
+    find "$old_artifacts_dir" -type f -not -name ".artifact_info" | while read -r file; do
+        printf "  • %s\n" "$(basename "$file")"
+    done
+    
+    echo
+    read -p "Proceed with remote namespace update? [Y/n]: " -r update_response
+    if [[ "$update_response" =~ ^[nN]$ ]]; then
+        info "Update cancelled"
+        return 0
+    fi
+    
+    # Perform the update
+    if _migrate_artifacts_namespace "$old_artifacts_dir" "$new_artifacts_dir"; then
+        okay "✓ Artifacts updated successfully"
+        rm -rf "$old_artifacts_dir"
+        info "Removed old artifacts directory"
+        
+        echo
+        info "🎯 Remote namespace update complete!"
+        printf "  New location: %b%s%b\n" "$green" "$new_artifacts_dir" "$xx"
+        echo
+        info "You can now commit safely. The pre-commit hook will use the correct namespace."
+    else
+        error "Update failed - old artifacts preserved"
+        return 1
+    fi
+}
+
 do_revoke() {
     local target="$1"
     local force="${2:-}"

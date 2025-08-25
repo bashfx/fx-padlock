@@ -4,58 +4,163 @@
 # Exit immediately if a command exits with a non-zero status.
 set -e
 
-# Simple test box function
+# Dynamic test box function
 test_box() {
     local title="$1"
     local num="$2"
+    
+    # Get terminal width, fallback to 80 if not available
+    local term_width
+    term_width=$(tput cols 2>/dev/null || echo "80")
+    
+    # Ensure minimum width
+    [[ $term_width -lt 50 ]] && term_width=50
+    
+    # Calculate content width (leave space for borders and padding)
+    local content_width=$((term_width - 4))
+    
+    # Build the title line
+    local test_label="Test ${num}: ${title}"
+    local title_length=${#test_label}
+    
+    # If title is too long, truncate it
+    if [[ $title_length -gt $((content_width - 4)) ]]; then
+        test_label="${test_label:0:$((content_width - 7))}..."
+        title_length=${#test_label}
+    fi
+    
+    # Calculate padding needed
+    local padding_needed=$((content_width - title_length - 3))  # 3 for "─ " and " "
+    
+    # Build the padding string
+    local padding=""
+    for ((i=0; i<padding_needed; i++)); do
+        padding+="─"
+    done
+    
     echo
-    echo "┌─ Test ${num}: ${title} ──────────────────────────────────────────────────────────────┐"
+    echo "┌─ ${test_label} ${padding}┐"
 }
 
 test_end() {
-    echo "└──────────────────────────────────────────────────────────────────────────────────────┘"
+    # Get terminal width, fallback to 80 if not available
+    local term_width
+    term_width=$(tput cols 2>/dev/null || echo "80")
+    
+    # Ensure minimum width
+    [[ $term_width -lt 50 ]] && term_width=50
+    
+    # Build bottom border
+    local bottom_border="└"
+    for ((i=1; i<term_width-1; i++)); do
+        bottom_border+="─"
+    done
+    bottom_border+="┘"
+    
+    echo "$bottom_border"
 }
 
 echo "🔐 PADLOCK TEST SUITE - Testing New Features"
 echo
 
-test_box "Build Verification" "01"
-echo "│ Building padlock.sh from modular components..."
-./build.sh > /dev/null
-echo "│ ✓ Build successful"
-test_end
-
-test_box "Basic Command Validation" "02"
-# Ensure padlock.sh is executable
-if [ ! -x ./padlock.sh ]; then
-    echo "│ ✗ ERROR: ./padlock.sh is not executable. Run chmod +x ./padlock.sh"
-    exit 1
+# Safety check: Ensure we test the local development version
+echo "Safety Check: Verifying test environment..."
+if command -v padlock >/dev/null 2>&1; then
+    echo "⚠️  WARNING: Global padlock installation detected"
+    echo "   System version: $(command -v padlock)"
+    echo "   Tests will use LOCAL ./padlock.sh version to avoid confusion"
 fi
+echo "✓ Testing local development version: ./padlock.sh"
+echo
 
-echo "│ Testing core command functionality..."
-./padlock.sh --help > /dev/null && echo "│ ✓ Help command responds" || echo "│ ✗ Help command failed"
-./padlock.sh version > /dev/null && echo "│ ✓ Version command responds" || echo "│ ✗ Version command failed"
-test_end
+run_isolated_test() {
+    local test_title="$1"
+    local test_num="$2"
+    local test_function="$3"
+    
+    test_box "$test_title" "$test_num"
+    
+    # Create isolated test environment
+    local test_dir
+    mkdir -p "$HOME/.cache/tmp"
+    test_dir=$(mktemp -d -p "$HOME/.cache/tmp")
+    local original_dir="$PWD"
+    
+    # Set up cleanup
+    trap "echo '│ → Cleaning up...'; cd '$original_dir'; rm -rf '$test_dir'" RETURN
+    
+    # Copy necessary files to test environment (ensures we test local development version)
+    cp -r parts "$test_dir/"
+    cp build.sh "$test_dir/"
+    [[ -f test_runner.sh ]] && cp test_runner.sh "$test_dir/"
+    
+    cd "$test_dir"
+    
+    # Download and set up gitsim for git operations
+    echo "│ → Setting up isolated test environment..."
+    curl -sL "https://raw.githubusercontent.com/bashfx/fx-gitsim/refs/heads/main/gitsim.sh" > gitsim.sh 2>/dev/null
+    chmod +x gitsim.sh
+    ./gitsim.sh init > /dev/null 2>&1
+    echo "│ ✓ Isolated environment ready"
+    
+    # Run the test function
+    "$test_function"
+    
+    test_end
+}
 
-test_box "New Security Commands" "03"
-echo "│ Verifying enhanced command structure..."
+test_build_verification() {
+    echo "│ Building padlock.sh from modular components..."
+    ./build.sh > /dev/null
+    echo "│ ✓ Build successful"
+}
 
-# Test new commands exist in help output
-help_output=$(./padlock.sh help 2>&1)
-echo "$help_output" | grep -q "setup" && echo "│ ✓ setup command in help" || echo "│ ✗ setup missing from help"
-echo "$help_output" | grep -q "key.*Manage encryption keys" && echo "│ ✓ key management in help" || echo "│ ✗ key management missing from help"  
-echo "$help_output" | grep -q "declamp" && echo "│ ✓ declamp command in help" || echo "│ ✗ declamp missing from help"
-echo "$help_output" | grep -q "revoke" && echo "│ ✓ revoke command in help" || echo "│ ✗ revoke missing from help"
-echo "$help_output" | grep -q "repair" && echo "│ ✓ repair command in help" || echo "│ ✗ repair missing from help"
+test_command_validation() {
+    echo "│ Testing core command functionality..."
+    
+    # Build first
+    ./build.sh > /dev/null
+    
+    # Check if padlock.sh exists and is executable
+    if [ ! -x ./padlock.sh ]; then
+        echo "│ ✗ ERROR: ./padlock.sh is not executable"
+        return 1
+    fi
+    
+    ./padlock.sh --help > /dev/null && echo "│ ✓ Help command responds" || echo "│ ✗ Help command failed"
+    ./padlock.sh version > /dev/null && echo "│ ✓ Version command responds" || echo "│ ✗ Version command failed"
+}
 
-echo "│"
-echo "│ Testing command responses..."
-./padlock.sh setup 2>/dev/null && echo "│ ✓ setup responds correctly" || echo "│ ✗ setup failed"
-./padlock.sh key 2>/dev/null && echo "│ ✓ key responds correctly" || echo "│ ✗ key failed"  
-./padlock.sh declamp 2>/dev/null && echo "│ ✓ declamp responds correctly" || echo "│ ✗ declamp failed"
-./padlock.sh revoke 2>/dev/null && echo "│ ✓ revoke responds correctly" || echo "│ ✗ revoke failed"
-./padlock.sh repair 2>/dev/null && echo "│ ✓ repair responds correctly" || echo "│ ✗ repair failed"
-test_end
+test_security_commands() {
+    echo "│ Verifying enhanced command structure..."
+    
+    # Build first  
+    ./build.sh > /dev/null
+    
+    help_output=$(./padlock.sh help 2>&1)
+    
+    # Check for key commands in help
+    echo "$help_output" | grep -q "setup" && echo "│ ✓ setup command in help" || echo "│ ✗ setup missing from help"
+    echo "$help_output" | grep -q "key.*Manage encryption keys" && echo "│ ✓ key management in help" || echo "│ ✗ key management missing from help"  
+    echo "$help_output" | grep -q "declamp" && echo "│ ✓ declamp command in help" || echo "│ ✗ declamp missing from help"
+    echo "$help_output" | grep -q "revoke" && echo "│ ✓ revoke command in help" || echo "│ ✗ revoke missing from help"
+    echo "$help_output" | grep -q "repair" && echo "│ ✓ repair command in help" || echo "│ ✗ repair missing from help"
+    echo "$help_output" | grep -q "map" && echo "│ ✓ map command in help" || echo "│ ✗ map missing from help"
+    
+    echo "│"
+    echo "│ Testing command responses..."
+    ./padlock.sh setup 2>/dev/null && echo "│ ✓ setup responds correctly" || echo "│ ✗ setup failed"
+    ./padlock.sh key 2>/dev/null && echo "│ ✓ key responds correctly" || echo "│ ✗ key failed"  
+    ./padlock.sh declamp 2>/dev/null && echo "│ ✓ declamp responds correctly" || echo "│ ✗ declamp failed"
+    ./padlock.sh revoke 2>/dev/null && echo "│ ✓ revoke responds correctly" || echo "│ ✗ revoke failed"
+    ./padlock.sh repair 2>/dev/null && echo "│ ✓ repair responds correctly" || echo "│ ✗ repair failed"
+    ./padlock.sh map 2>/dev/null && echo "│ ✓ map responds correctly" || echo "│ ✗ map failed"
+}
+
+# Run isolated tests
+run_isolated_test "Build Verification" "01" "test_build_verification"
+run_isolated_test "Command Validation" "02" "test_command_validation"  
+run_isolated_test "Security Commands" "03" "test_security_commands"
 
 run_e2e_test() {
     local test_type="$1"

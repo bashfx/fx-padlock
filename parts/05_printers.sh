@@ -142,6 +142,67 @@ _find_root() {
 REPO_ROOT="$(_find_root)"
 LOCKER_DIR="$REPO_ROOT/locker"
 
+# Check for namespace migration before committing
+_check_namespace_migration() {
+    # Only check if we have both a git remote and are currently in 'local' namespace
+    local remote_url
+    remote_url=$(git remote get-url origin 2>/dev/null || echo "")
+    
+    if [[ -z "$remote_url" ]]; then
+        return 0  # No remote, stay in local namespace
+    fi
+    
+    # Parse remote URL to determine what namespace should be
+    local repo_name=$(basename "$REPO_ROOT")
+    local host user_repo
+    
+    if [[ "$remote_url" =~ ^https?://([^/]+)/([^/]+)/([^/]+) ]]; then
+        # HTTPS: https://github.com/user/repo.git
+        host="${BASH_REMATCH[1]}"
+        user_repo="${BASH_REMATCH[2]}/${BASH_REMATCH[3]%.git}"
+    elif [[ "$remote_url" =~ ^[^@]+@([^:]+):([^/]+)/([^/]+) ]]; then
+        # SSH: git@github.com:user/repo.git
+        host="${BASH_REMATCH[1]}"
+        user_repo="${BASH_REMATCH[2]}/${BASH_REMATCH[3]%.git}"
+    else
+        # Unknown format, use 'unknown' namespace
+        host="unknown"
+        user_repo=$(basename "$REPO_ROOT")
+    fi
+    
+    # Check if local artifacts exist but remote namespace should be used
+    local padlock_etc="${XDG_ETC_HOME:-$HOME/.local/etc}/padlock"
+    local local_artifacts="$padlock_etc/repos/local/$repo_name"
+    local remote_artifacts="$padlock_etc/repos/$host/$user_repo"
+    
+    if [[ -d "$local_artifacts" && ! -d "$remote_artifacts" && "$host" != "local" ]]; then
+        echo
+        echo "🚨 NAMESPACE MIGRATION REQUIRED"
+        echo "   Your repository now has a remote origin, but padlock artifacts"
+        echo "   are still in the 'local' namespace. This could cause issues."
+        echo
+        echo "   Remote: $remote_url"
+        echo "   Current: $padlock_etc/repos/local/$repo_name"
+        echo "   Should be: $padlock_etc/repos/$host/$user_repo"
+        echo
+        
+        # In git hooks, we can't use read for interactive input reliably
+        # So we'll just warn and suggest the command to run
+        echo "⚠️  Please run this command to update before committing:"
+        echo -e "   \033[32mpadlock remote\033[0m"
+        echo
+        echo "❌ Commit blocked to prevent namespace confusion."
+        return 1
+    fi
+    
+    return 0
+}
+
+# Run namespace migration check
+if ! _check_namespace_migration; then
+    exit 1
+fi
+
 if [[ -d "$LOCKER_DIR" ]]; then
     echo "🔒 Auto-encrypting locker before commit..."
     if "$REPO_ROOT/bin/padlock" lock; then

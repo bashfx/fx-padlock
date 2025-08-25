@@ -339,17 +339,79 @@ _lock_chest() {
     # Load config from inside the locker to get recipients/passphrase
     source "$REPO_ROOT/locker/.padlock"
 
-    # Encrypt locker directly into the chest
+    # Build list of files to include in chest
+    local files_to_include=("locker")
+    local mapped_count=0
+    
+    # Check for mapped files
+    if [[ -f "$REPO_ROOT/padlock.map" ]]; then
+        info "📋 Including mapped files..."
+        while IFS='|' read -r src_rel dest_rel; do
+            # Skip comments and empty lines
+            [[ "$src_rel" =~ ^[[:space:]]*# ]] && continue
+            [[ -z "$src_rel" ]] && continue
+            
+            local src_abs="$REPO_ROOT/$src_rel"
+            if [[ -e "$src_abs" ]]; then
+                files_to_include+=("$src_rel")
+                ((mapped_count++))
+                trace "Including: $src_rel"
+            else
+                warn "Mapped file not found: $src_rel"
+            fi
+        done < "$REPO_ROOT/padlock.map"
+        
+        if [[ $mapped_count -gt 0 ]]; then
+            info "📁 Including $mapped_count mapped items"
+        fi
+    fi
+
+    # Encrypt locker and mapped files into the chest
     local chest_blob="$REPO_ROOT/.chest/locker.age"
     mkdir -p "$REPO_ROOT/.chest"
-    if tar -czf - -C "$REPO_ROOT" locker | __encrypt_stream > "$chest_blob"; then
-        # Remove plaintext locker *after* success
+    
+    # Create temporary directory for staging
+    local temp_chest
+    temp_chest=$(mktemp -d)
+    trap 'rm -rf "$temp_chest"' RETURN
+    
+    # Copy all files to staging area
+    for item in "${files_to_include[@]}"; do
+        local src_path="$REPO_ROOT/$item"
+        local dest_path="$temp_chest/$item"
+        
+        if [[ -f "$src_path" ]]; then
+            mkdir -p "$(dirname "$dest_path")"
+            cp "$src_path" "$dest_path"
+        elif [[ -d "$src_path" ]]; then
+            cp -r "$src_path" "$dest_path"
+        fi
+    done
+    
+    # Create chest archive and encrypt
+    if tar -czf - -C "$temp_chest" . | __encrypt_stream > "$chest_blob"; then
+        # Remove plaintext files after successful encryption
         rm -rf "$REPO_ROOT/locker"
-        okay "✓ Chest locked. Plaintext locker removed."
+        
+        # Remove mapped files if they were included (optional, could be configurable)
+        if [[ $mapped_count -gt 0 ]]; then
+            info "🗑️  Removing plaintext mapped files..."
+            while IFS='|' read -r src_rel dest_rel; do
+                [[ "$src_rel" =~ ^[[:space:]]*# ]] && continue
+                [[ -z "$src_rel" ]] && continue
+                
+                local src_abs="$REPO_ROOT/$src_rel"
+                if [[ -e "$src_abs" ]]; then
+                    rm -rf "$src_abs"
+                    trace "Removed: $src_rel"
+                fi
+            done < "$REPO_ROOT/padlock.map"
+        fi
+        
+        okay "✓ Chest locked with $((${#files_to_include[@]})) items"
         return 0
     else
-        error "Failed to encrypt locker into chest."
-        # Cleanup failed attempt
+        error "Failed to encrypt chest."
         rm -f "$chest_blob"
         return 1
     fi
