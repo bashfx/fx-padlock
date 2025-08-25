@@ -298,6 +298,7 @@ _lock_chest() {
 
 # Wrapper for ignition unlock process
 _unlock_chest() {
+
     local encrypted_ignition_key_blob="$REPO_ROOT/.chest/ignition.age"
     local chest_blob="$REPO_ROOT/.chest/locker.age"
 
@@ -306,10 +307,12 @@ _unlock_chest() {
         return 1
     fi
 
+
     if [[ -z "${PADLOCK_IGNITION_PASS:-}" ]]; then
         error "Ignition key not found in environment variable PADLOCK_IGNITION_PASS."
         return 1
     fi
+
 
     info "🗃️  Unlocking locker from .chest using ignition passphrase..."
 
@@ -331,11 +334,14 @@ _unlock_chest() {
 
     if __decrypt_stream < "$chest_blob" | tar -xzf - -C "$REPO_ROOT"; then
         # Remove chest *after* successful decryption
+
         rm -rf "$REPO_ROOT/.chest"
         okay "✓ Chest unlocked. Encrypted chest removed."
         return 0
     else
+
         error "Failed to decrypt locker from chest using ignition key."
+
         rm -rf "$REPO_ROOT/locker"
         return 1
     fi
@@ -429,6 +435,19 @@ _rotate_ignition_key() {
     okay "✓ Ignition key successfully rotated."
     info "🔑 Your new ignition passphrase is: $new_passphrase"
     warn "⚠️  Update any automated systems with this new passphrase."
+}
+
+_ensure_master_key() {
+    if [[ ! -f "$PADLOCK_GLOBAL_KEY" ]]; then
+        info "🔑 Generating global master key..."
+        mkdir -p "$(dirname "$PADLOCK_GLOBAL_KEY")"
+        age-keygen -o "$PADLOCK_GLOBAL_KEY" >/dev/null
+        chmod 600 "$PADLOCK_GLOBAL_KEY"
+        okay "✓ Global master key created at: $PADLOCK_GLOBAL_KEY"
+        warn "⚠️  This key is your ultimate backup. Keep it safe."
+    else
+        trace "Global master key already exists."
+    fi
 }
 
 _ensure_master_key() {

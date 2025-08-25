@@ -263,7 +263,7 @@ do_lock() {
 
         # Create a simple state file to indicate locked status
         touch .locked
-        
+
         # Remove plaintext locker *after* successful encryption and move
         rm -rf locker
         
