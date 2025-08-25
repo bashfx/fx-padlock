@@ -357,6 +357,8 @@ run_ignition_test "git"
 run_ignition_test "gitsim"
 run_master_unlock_test
 run_install_tests
+run_export_import_tests
+run_export_import_tests
 
 echo
 echo "================================"
