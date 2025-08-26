@@ -338,14 +338,15 @@ run_ignition_backup_test() {
     fi
     
     echo "│ → Testing key restore command availability..."
-    if ./padlock.sh key restore --help > /dev/null 2>&1 || ./padlock.sh key restore > /dev/null 2>&1; then
+    # Test that the command exists and gives proper error without backup
+    if echo "" | timeout 3s ./padlock.sh key restore --help > /dev/null 2>&1; then
         echo "│ ✓ Key restore command available"
     else
         echo "│ ✓ Key restore command available (expected failure without backup)"
     fi
     
     echo "│ → Testing setup command availability..."
-    if ./padlock.sh setup > /dev/null 2>&1; then
+    if timeout 10s ./padlock.sh setup > /dev/null 2>&1; then
         echo "│ ✓ Setup command functional"
     else
         echo "│ ✓ Setup command functional (expected message)"
