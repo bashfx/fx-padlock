@@ -78,7 +78,9 @@ if ! _check_namespace_migration; then
     exit 1
 fi
 
+# Check repository encryption state
 if [[ -d "$LOCKER_DIR" ]]; then
+    # Repository is unlocked - need to encrypt before commit
     echo "🔒 Auto-encrypting locker before commit..."
     if "$REPO_ROOT/bin/padlock" lock; then
         echo "✓ Locker encrypted successfully"
@@ -87,6 +89,26 @@ if [[ -d "$LOCKER_DIR" ]]; then
         echo "✗ Failed to encrypt locker" >&2
         exit 1
     fi
+elif [[ -f "$REPO_ROOT/.chest/locker.age" ]]; then
+    # Repository is already locked - check if we're trying to commit plaintext secrets
+    if git diff --cached --name-only | grep -E "^(locker/|NOTES\.md|TODO\.md|FEATURES\.md|build\.sh)" > /dev/null; then
+        echo "🚨 ERROR: Attempting to commit plaintext secrets while repository is locked!"
+        echo "🚨 This suggests files were added after encryption."
+        echo ""
+        echo "To fix this:"
+        echo "  1. Run: padlock unlock"
+        echo "  2. Make your changes to locker/ directory"  
+        echo "  3. Commit again (auto-encryption will happen)"
+        echo ""
+        echo "Or if you want to commit non-secret changes only:"
+        echo "  1. Reset staged secret files: git reset HEAD <secret-files>"
+        echo "  2. Commit only the non-secret changes"
+        exit 1
+    fi
+    echo "✓ Repository encrypted - proceeding with commit"
+else
+    # No locker setup detected
+    echo "⚠️  No padlock encryption detected"
 fi
 
 exit 0
