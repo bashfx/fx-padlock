@@ -1,8 +1,0 @@
-# Padlock encryption
-locker.age filter=locker-crypt
-locker.age binary
-
-# Keep tools plaintext
-bin/* -filter
-.githooks/* -filter
-

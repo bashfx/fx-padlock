@@ -90,8 +90,8 @@ if [[ -d "$LOCKER_DIR" ]]; then
         exit 1
     fi
 elif [[ -f "$REPO_ROOT/.chest/locker.age" ]]; then
-    # Repository is already locked - check if we're trying to commit plaintext secrets
-    if git diff --cached --name-only | grep -E "^(locker/|NOTES\.md|TODO\.md|FEATURES\.md|build\.sh)" > /dev/null; then
+    # Repository is already locked - check if we're trying to ADD plaintext secrets (not delete)
+    if git diff --cached --name-status | grep -E "^[AM].*\b(locker/|NOTES\.md|TODO\.md|FEATURES\.md|build\.sh)" > /dev/null; then
         echo "🚨 ERROR: Attempting to commit plaintext secrets while repository is locked!"
         echo "🚨 This suggests files were added after encryption."
         echo ""
