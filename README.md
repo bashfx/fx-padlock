@@ -243,23 +243,23 @@ my-repo/
 
 ### **✅ Completed**
 - Core locker encryption with age
-- Git integration (hooks, filters, checksum)
+- Git integration (hooks, filters, chest pattern)
 - Master key and ignition backup system
 - Repository repair and recovery tools
 - Interactive setup and key management
 - Enhanced manifest system with namespace tracking
 - Team collaboration via public key sharing
-- Comprehensive test suite with ceremonious presentation
+- Comprehensive test suite (all tests passing)
 - Export/import for cross-system migration
 - Repository declamp and access revocation
-
-### **🚧 In Progress**
-- Overdrive mode (partial implementation, some edge cases)
+- Overdrive mode (full repository encryption)
+- Map/unmap functionality for external file handling
 
 ### **📋 Planned**
 - Web interface for repository management
 - Integration with CI/CD systems
 - Advanced backup strategies
+- Enhanced team collaboration features
 
 ## 📖 **Documentation**
 
