@@ -132,6 +132,38 @@ padlock status                    # Show lock/unlock state
 # Note: Git hooks automatically handle lock/unlock during commits/checkouts
 ```
 
+### **Git Integration & Workflow**
+Padlock provides seamless git integration with intelligent pre-commit hooks:
+
+```bash
+# Recommended workflow (hooks handle everything automatically):
+padlock unlock                   # Decrypt secrets for editing
+# Edit files in locker/docs_sec/, locker/conf_sec/, etc.
+git add . && git commit          # Auto-encrypts before commit
+# → Hook encrypts locker/ → .chest/locker.age
+# → Only encrypted files are committed
+# → Plaintext files are automatically cleaned up
+
+# After checkout/pull:
+padlock unlock                   # Decrypt latest encrypted content
+```
+
+**Hook Behavior:**
+- **When Unlocked** (`locker/` exists): Auto-encrypts before each commit
+- **When Locked** (only `.chest/` exists): Prevents committing plaintext secrets
+- **Error Guidance**: Provides clear instructions when workflow is incorrect
+
+```bash
+# If you accidentally try to commit plaintext while locked:
+git commit
+# 🚨 ERROR: Attempting to commit plaintext secrets while repository is locked!
+# 
+# To fix this:
+#   1. Run: padlock unlock  
+#   2. Make your changes to locker/ directory
+#   3. Commit again (auto-encryption will happen)
+```
+
 ### **Key Management**
 ```bash
 padlock key --generate-global     # Create new global master key
