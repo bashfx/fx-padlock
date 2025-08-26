@@ -17,21 +17,25 @@ padlock clamp /my/repo --generate
 echo "SECRET_API_KEY=abc123" > locker/conf_sec/.env
 echo "Internal docs" > locker/docs_sec/notes.md
 
-# Commit (auto-encrypts with checksum)
+# Commit (auto-encrypts with pre-commit hook)
 git add . && git commit -m "Add secrets"
+# → Automatically encrypts locker/ → .chest/locker.age
+# → Only encrypted files are committed to git
 
-# Unlock after checkout
+# Unlock after checkout/pull
 padlock unlock
+# → Decrypts .chest/locker.age → locker/
 ```
 
 ## 🔑 **Core Features**
 
 ### **✅ Standard Locker Encryption**
-- **Transparent workflow**: Edit plaintext locally, automatic encryption in git
-- **Complete opacity**: Single encrypted blob reveals nothing about contents
+- **Transparent workflow**: Edit plaintext locally, automatic encryption via git hooks
+- **Complete opacity**: Single encrypted blob reveals nothing about contents  
 - **Team-friendly**: Simple public key sharing without GPG complexity
-- **Self-contained**: Each repo becomes autonomous
+- **Self-contained**: Each repo becomes autonomous with integrated tooling
 - **Integrity verification**: MD5 checksums ensure content integrity
+- **Chest pattern**: Encrypted files stored in `.chest/` directory, plaintext in `locker/` (gitignored)
 
 ### **✅ Ignition Backup System**
 Passphrase-encrypted master key backup for disaster recovery:
@@ -80,7 +84,7 @@ padlock clean-manifest            # Remove stale entries
 Comprehensive validation with ceremonious presentation:
 
 ```bash
-# Run full test suite
+# Run full test suite (all tests now pass cleanly)
 ./test_runner.sh
 
 # Tests include:
@@ -88,17 +92,19 @@ Comprehensive validation with ceremonious presentation:
 # - Command validation  
 # - E2E workflows (git & gitsim)
 # - Repair functionality
-# - Ignition backup system
-# - Overdrive mode
+# - Ignition backup system (with timeout handling)
+# - Map/Unmap & chest pattern functionality
+# - Overdrive mode (full repository encryption)
 ```
 
-### **🚧 Overdrive Mode** *(Partial)*
+### **✅ Overdrive Mode**
 Full repository encryption for maximum security:
 
 ```bash
 # Encrypt entire repository into traveling blob
 padlock overdrive lock            # → super_chest.age
-source .overdrive                 # Restore full repository
+padlock overdrive unlock          # Restore full repository
+padlock overdrive status          # Check overdrive state
 ```
 
 ## 🎯 **Command Reference**
@@ -120,9 +126,10 @@ padlock clamp <path>              # Deploy to repository
 
 ### **Daily Operations**
 ```bash
-padlock lock                      # Encrypt locker/ → locker.age
-padlock unlock                    # Decrypt locker.age → locker/
+padlock lock                      # Encrypt locker/ → .chest/locker.age
+padlock unlock                    # Decrypt .chest/locker.age → locker/
 padlock status                    # Show lock/unlock state
+# Note: Git hooks automatically handle lock/unlock during commits/checkouts
 ```
 
 ### **Key Management**
@@ -194,15 +201,20 @@ padlock install         # Installs to ~/.local/bin/
 ### **Standard Mode**
 ```
 my-repo/
-├── locker/              # Plaintext (unlocked) or absent (locked)
+├── locker/              # Plaintext (unlocked) - .gitignored
 │   ├── docs_sec/       # Secure documentation  
 │   ├── conf_sec/       # API keys, configs
 │   └── .padlock        # Crypto configuration
-├── locker.age          # Encrypted blob (locked) or absent (unlocked)
-├── .locked             # Lock status indicator
-├── .locker_checksum    # Integrity verification
+├── .chest/              # Encrypted storage (committed to git)
+│   ├── locker.age      # Encrypted blob
+│   ├── .locked         # Lock status indicator  
+│   └── .locker_checksum # Integrity verification
 ├── bin/padlock         # Self-contained tools
 └── .githooks/          # Automatic encryption hooks
+    ├── pre-commit      # Auto-lock before commits
+    ├── post-checkout   # Auto-unlock after checkout  
+    ├── post-merge      # Refresh after merge
+    └── post-commit     # Verify encryption
 ```
 
 ### **Global Configuration**

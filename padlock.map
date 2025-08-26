@@ -9,5 +9,6 @@ RUST_PORT_PLAN.md|RUST_PORT_PLAN.md|d3bf34c2b7312f2d0948d27fddb15df8
 STATUS.md|STATUS.md|0ecea0b685875e0434a78eac4a6d3e18
 FEATURES.md|FEATURES.md|406d501e86781124fed60ca68593f471
 build.sh|build.sh|28074bfbff1bc959b38f206e349c0416
-parts|parts|7e406eea4bc71ef24ec20d1ba5cee4e8
-.claude|.claude|b83fea8ee8aa57ad29f7b80584976a5c
+parts|parts|da3351bab8850e5cb9b99b619b38ddc9
+.claude|.claude|4f6eaaf979a407cadb58264d5ec00e05
+test_runner.sh|test_runner.sh|28e04bce9a08d933efed18e8514fe9c9
