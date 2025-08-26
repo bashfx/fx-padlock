@@ -1,43 +1,15 @@
 do_clamp() {
     local target_path="${1:-.}"
-    local use_global_key=false
-    local generate_key=false
-    local explicit_key=""
-    local use_ignition=false
-    local ignition_key=""
     
-    # Parse arguments
-    shift
-    while [[ $# -gt 0 ]]; do
-        case "$1" in
-            --global-key) 
-                use_global_key=true
-                shift
-                ;;
-            --generate) 
-                generate_key=true
-                shift
-                ;;
-            --key)
-                if [[ $# -lt 2 ]]; then fatal "--key option requires an argument"; fi
-                explicit_key="$2"
-                shift 2
-                ;;
-            -K|--ignition)
-                use_ignition=true
-                if [[ $# -gt 1 && -n "${2:-}" && "$2" != -* ]]; then
-                    ignition_key="$2"
-                    shift 2
-                else
-                    shift
-                fi
-                ;;
-            *) 
-                error "Unknown option: $1"
-                return 1
-                ;;
-        esac
-    done
+    # Use opt_* variables set by options() function
+    local use_global_key=$opt_global_key
+    local generate_key=$opt_generate
+    local explicit_key="$opt_key"
+    local use_ignition=$opt_ignition
+    local ignition_key="$opt_ignition_key"
+    
+    # Debug: Show what flags were parsed
+    trace "DEBUG: opt_global_key=$opt_global_key generate=$opt_generate key='$opt_key' ignition=$opt_ignition"
     
     target_path="$(realpath "$target_path")"
     
@@ -1884,37 +1856,46 @@ do_setup() {
             _create_ignition_backup
             return $?
             ;;
+        "")
+            # Default interactive setup - no subcommand provided
+            # Fall through to main setup logic
+            ;;
         *)
-            # Default interactive setup
-            _logo
-            info "🔧 Padlock Interactive Setup"
-            echo
-            
-            if [[ -f "$PADLOCK_GLOBAL_KEY" ]]; then
-                okay "✓ Master key already exists"
-                
-                # Check if ignition backup exists
-                local ignition_backup="$PADLOCK_KEYS/ignition.age"
-                if [[ -f "$ignition_backup" ]]; then
-                    okay "✓ Ignition backup exists"
-                    info "Your padlock is fully configured."
-                    echo
-                    info "Available commands:"
-                    info "  padlock clamp <dir>       - Deploy to a new repository"
-                    info "  padlock setup ignition    - Recreate ignition backup"
-                    info "  padlock key restore       - Restore from ignition backup"
-                    info "  padlock --help            - Show all commands"
-                    return 0
-                else
-                    warn "⚠️  Ignition backup is missing"
-                    info "Creating ignition backup from existing master key..."
-                    echo
-                    _create_ignition_backup
-                    return $?
-                fi
-            fi
+            # Unknown subcommand
+            error "Unknown setup subcommand: $subcommand"
+            info "Usage: padlock setup [ignition]"
+            return 1
             ;;
     esac
+    
+    # Interactive setup logic
+    _logo
+    info "🔧 Padlock Interactive Setup"
+    echo
+    
+    if [[ -f "$PADLOCK_GLOBAL_KEY" ]]; then
+        okay "✓ Master key already exists"
+        
+        # Check if ignition backup exists
+        local ignition_backup="$PADLOCK_KEYS/ignition.age"
+        if [[ -f "$ignition_backup" ]]; then
+            okay "✓ Ignition backup exists"
+            info "Your padlock is fully configured."
+            echo
+            info "Available commands:"
+            info "  padlock clamp <dir>       - Deploy to a new repository"
+            info "  padlock setup ignition    - Recreate ignition backup"
+            info "  padlock key restore       - Restore from ignition backup"
+            info "  padlock --help            - Show all commands"
+            return 0
+        else
+            warn "⚠️  Ignition backup is missing"
+            info "Creating ignition backup from existing master key..."
+            echo
+            _create_ignition_backup
+            return $?
+        fi
+    fi
     
     echo "This will set up padlock encryption with a master key and ignition backup."
     echo "The ignition backup allows you to recover your master key if lost."

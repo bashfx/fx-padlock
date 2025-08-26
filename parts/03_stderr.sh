@@ -39,7 +39,14 @@ unlock=$'\u26BF'      # ⚿
 # Core printer function
 __printx() {
     local text="$1" color="$2" prefix="$3" stream="${4:-2}"
-    local color_code="${!color:-$white}"
+    local color_code=""
+    
+    # Safely get color code with fallback
+    if [[ -n "$color" ]]; then
+        color_code="${!color:-}"
+    fi
+    [[ -z "$color_code" ]] && color_code="$white"
+    
     [[ -n "$text" ]] && printf "%b" "${color_code}${prefix}${text}${xx}" >&"$stream"
 }
 
@@ -48,18 +55,18 @@ __log() {
     local type="$1" text="$2" force="${3:-0}" stream=2
 
     # Respect global quiet mode
-    if [[ "$opt_quiet" -eq 0 && "$force" -eq 1 ]]; then
+    if [[ "${opt_quiet:-0}" -eq 1 && "$force" -eq 0 ]]; then
         [[ "$type" == "fatal" || "$type" == "error" ]] || return 0
     fi
 
     case "$type" in
         fatal) __printx "$text\n" "red" "$fail " "$stream"; exit 1 ;;
         error) __printx "$text\n" "red" "$fail " "$stream" ;;
-        warn)  [[ $force -eq 0 || $opt_debug -eq 0 ]] && __printx "$text\n" "orange" "$delta " "$stream" ;;
-        okay)  [[ $force -eq 0 || $opt_debug -eq 0 ]] && __printx "$text\n" "green" "$pass " "$stream" ;;
-        info)  [[ $opt_debug -eq 0 ]] && __printx "$text\n" "blue" "$recv " "$stream" ;;
-        trace) [[ $opt_trace -eq 0 ]] && __printx "$text\n" "grey" "$idots " "$stream" ;;
-        think) [[ $opt_trace -eq 0 ]] && __printx "$text\n" "purple" "$lambda " "$stream" ;;
+        warn)  [[ "${opt_quiet:-0}" -ne 1 ]] && __printx "$text\n" "orange" "$delta " "$stream" ;;
+        okay)  [[ "${opt_quiet:-0}" -ne 1 ]] && __printx "$text\n" "green" "$pass " "$stream" ;;
+        info)  [[ "${opt_quiet:-0}" -ne 1 ]] && __printx "$text\n" "blue" "$recv " "$stream" ;;
+        trace) [[ "${opt_trace:-0}" -eq 1 ]] && __printx "$text\n" "grey" "$idots " "$stream" ;;
+        think) [[ "${opt_trace:-0}" -eq 1 ]] && __printx "$text\n" "purple" "$lambda " "$stream" ;;
         lock)  __printx "$text\n" "cyan" "$unlock " "$stream" ;;
     esac
 }

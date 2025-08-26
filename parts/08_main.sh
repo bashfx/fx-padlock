@@ -19,29 +19,36 @@ main() {
     # Parse options first (modifies opt_* variables)
     options "$@"
     
-    # Skip processed options to get to command
+    # Strip all flags from arguments (they're already processed in opt_* variables)
+    local clean_args=()
     while [[ $# -gt 0 ]]; do
         case "$1" in
-            -d|--debug|-t|--trace|-q|--quiet|-f|--force|-y|--yes|-D|--dev)
-                shift
-                ;;
-            -h|--help|-v|--version)
-                # These are handled in options() and exit
-                shift
-                ;;
             --)
                 shift
+                # Add all remaining args after --
+                clean_args+=("$@")
                 break
                 ;;
             -*)
-                shift  # Skip unknown options (already handled in options())
+                # Skip all flags (already processed by options())
+                if [[ "$1" == "--key" || "$1" == "-K" || "$1" == "--ignition" ]] && [[ $# -gt 1 && "${2:-}" != -* ]]; then
+                    # Skip flag with value
+                    shift 2
+                else
+                    # Skip flag without value
+                    shift
+                fi
                 ;;
             *)
-                # Found command
-                break
+                # Keep non-flag arguments
+                clean_args+=("$1")
+                shift
                 ;;
         esac
     done
+    
+    # Set positional parameters to clean arguments
+    set -- "${clean_args[@]}"
     
     # Show startup info in dev mode
     if is_dev; then

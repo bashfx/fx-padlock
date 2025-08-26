@@ -313,6 +313,11 @@ _calculate_locker_checksum() {
 
 # Display colored padlock logo from header comments
 _logo() {
+    # Skip logo if quiet mode is enabled
+    if [[ "${opt_quiet:-0}" == "1" ]]; then
+        return 0
+    fi
+    
     # Extract figlet logo from script header (original lines 3-8, offset by 4 build lines = 7-12)
     sed -n '7,12s/^# *//p' "$0" 2>/dev/null | while IFS= read -r line; do
         printf "\033[36m%s\033[0m\n" "$line"
@@ -332,33 +337,71 @@ _validate_clamp_target() {
 }
 
 _setup_crypto_with_master() {
-    local key_file="$1"
-    local use_ignition="$2"
-    local ignition_key="$3"
+    local repo_key_file="$1"
+    local use_ignition="${2:-false}"
+    local ignition_key="${3:-}"
+    
+    trace "Setting up crypto with master key integration"
+    
+    # Ensure master key exists
+    _ensure_master_key
+    
+    # Create .padlock config file
+    local padlock_config="$LOCKER_DIR/.padlock"
+    cat > "$padlock_config" << EOF
+# Padlock crypto configuration
+PADLOCK_KEY_FILE="$repo_key_file"
+AGE_RECIPIENTS="\$(<\"\$PADLOCK_KEY_FILE\" age-keygen -y)"
+EOF
+    
+    # Add master key as backup recipient
+    local master_recipient
+    master_recipient=$(age-keygen -y < "$PADLOCK_GLOBAL_KEY")
+    echo "AGE_RECIPIENTS=\"\${AGE_RECIPIENTS},${master_recipient}\"" >> "$padlock_config"
+    
+    trace "Created .padlock configuration with master key backup"
+}
 
-    PADLOCK_KEY_FILE="$key_file"
 
-    if [[ "$use_ignition" == "true" ]]; then
-        AGE_PASSPHRASE="$ignition_key"
-    else
-        # Ensure the global master key exists to be added as a recipient.
-        _ensure_master_key
 
-        # Get the public key of the repo-specific key.
-        local repo_recipient
-        repo_recipient=$(age-keygen -y "$key_file" 2>/dev/null)
+_add_to_manifest() {
+    local repo_root="$1"
+    local manifest_type="$2"
+    
+    trace "Adding to manifest: $repo_root ($manifest_type)"
+    
+    # Create manifest entry
+    local manifest_file="$PADLOCK_ETC/repos/manifest.txt"
+    local repo_name=$(basename "$repo_root")
+    local timestamp=$(date -Iseconds)
+    
+    mkdir -p "$(dirname "$manifest_file")"
+    echo "$timestamp|$manifest_type|$repo_name|$repo_root" >> "$manifest_file"
+    
+    trace "Added manifest entry"
+}
 
-        # Get the public key of the global master key.
-        local master_recipient
-        master_recipient=$(age-keygen -y "$PADLOCK_GLOBAL_KEY" 2>/dev/null)
-
-        # Combine them. __encrypt_stream handles comma-separated lists.
-        AGE_RECIPIENTS="$repo_recipient,$master_recipient"
-        trace "Repo recipient: $repo_recipient"
-        trace "Master recipient: $master_recipient"
+_backup_repo_artifacts() {
+    local repo_root="$1"
+    
+    trace "Backing up repository artifacts for: $repo_root"
+    
+    # Create backup directory structure
+    local repo_name=$(basename "$repo_root")
+    local backup_dir="$PADLOCK_ETC/backups/$repo_name"
+    
+    mkdir -p "$backup_dir"
+    
+    # Backup key files if they exist
+    if [[ -f "$LOCKER_DIR/.padlock" ]]; then
+        cp "$LOCKER_DIR/.padlock" "$backup_dir/padlock_config.bak"
+        trace "Backed up .padlock config"
     fi
-
-    __print_padlock_config "$LOCKER_CONFIG" "$(basename "$REPO_ROOT")"
+    
+    # Create timestamp
+    date -Iseconds > "$backup_dir/backup_timestamp"
+    
+    trace "Repository artifacts backed up"
 }
 
 # Guard function for chest mode
@@ -643,35 +686,70 @@ _create_ignition_backup() {
         return 0
     fi
     
-    info "🔥 Creating ignition backup system..."
-    echo "Enter a memorable passphrase to encrypt your master key backup:"
-    echo "(This allows recovery if your master key file is lost)"
+    echo
+    printf "%b🔥 IGNITION BACKUP SETUP%b\n" "$cyan" "$xx"
+    printf "%b━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━%b\n" "$cyan" "$xx"
+    echo
+    info "🔑 Creating encrypted backup of your master key..."
+    echo
+    printf "%bThis backup allows emergency recovery if your master key is lost.%b\n" "$yellow" "$xx"
+    printf "%bYou'll need ONE memorable passphrase (asked twice to prevent typos).%b\n" "$yellow" "$xx"
+    echo
+    printf "%bMinimum 8 characters required%b\n" "$grey" "$xx"
+    echo
     
     local passphrase
     local passphrase_confirm
     
     while true; do
-        read -s -p "Passphrase: " passphrase
-        echo
-        read -s -p "Confirm passphrase: " passphrase_confirm
-        echo
+        printf "%b🔐 Enter ignition passphrase:%b " "$green" "$xx"
+        read passphrase
+        printf "%b🔐 Confirm same passphrase:%b " "$green" "$xx"
+        read passphrase_confirm
         
+        # Debug output (remove this later)
+        trace "Passphrase length: ${#passphrase}"
+        trace "Confirm length: ${#passphrase_confirm}"
+        
+        # Check if first passphrase is set
+        if [[ -z "$passphrase" ]]; then
+            warn "No passphrase entered. Please try again."
+            continue
+        fi
+        
+        # Check if confirmation passphrase is set
+        if [[ -z "$passphrase_confirm" ]]; then
+            warn "No confirmation passphrase entered. Please try again."
+            continue
+        fi
+        
+        # Check if passphrases match
         if [[ "$passphrase" == "$passphrase_confirm" ]]; then
             if [[ ${#passphrase} -lt 8 ]]; then
                 warn "Passphrase must be at least 8 characters. Please try again."
                 continue
             fi
+            trace "Password validation successful, breaking loop"
             break
         else
             warn "Passphrases don't match. Please try again."
         fi
     done
     
+    echo
+    info "🔐 Encrypting master key with your passphrase..."
+    
     # Encrypt the master key with the passphrase
-    if AGE_PASSPHRASE="$passphrase" age -p < "$PADLOCK_GLOBAL_KEY" > "$ignition_backup"; then
+    if echo "$passphrase" | age -p < "$PADLOCK_GLOBAL_KEY" > "$ignition_backup"; then
         chmod 600 "$ignition_backup"
+        echo
+        printf "%b🎉 IGNITION BACKUP COMPLETE!%b\n" "$green" "$xx"
+        printf "%b━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━%b\n" "$green" "$xx"
+        echo
         okay "✓ Ignition backup created: $ignition_backup"
         info "💡 To restore master key: padlock key restore"
+        echo
+        warn "⚠️  Remember your passphrase - you'll need it for emergency recovery!"
     else
         error "Failed to create ignition backup"
         rm -f "$ignition_backup"

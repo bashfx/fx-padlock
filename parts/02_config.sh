@@ -35,5 +35,12 @@ opt_force=0
 opt_yes=0
 opt_dev=0
 
+# Command-specific options
+opt_global_key=0
+opt_generate=0
+opt_key=""
+opt_ignition=0
+opt_ignition_key=""
+
 # Bootstrap - ensure critical directories exist
 mkdir -p "$PADLOCK_ETC" "$PADLOCK_KEYS"

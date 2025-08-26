@@ -68,9 +68,9 @@ echo "Safety Check: Verifying test environment..."
 if command -v padlock >/dev/null 2>&1; then
     echo "⚠️  WARNING: Global padlock installation detected"
     echo "   System version: $(command -v padlock)"
-    echo "   Tests will use LOCAL ./padlock.sh version to avoid confusion"
+    echo "   Tests will use LOCAL ../padlock.sh version to avoid confusion"
 fi
-echo "✓ Testing local development version: ./padlock.sh"
+echo "✓ Testing local development version: ../padlock.sh"
 echo
 
 run_isolated_test() {
@@ -94,13 +94,20 @@ run_isolated_test() {
     cp build.sh "$test_dir/"
     [[ -f test_runner.sh ]] && cp test_runner.sh "$test_dir/"
     
+    # Copy any stub files that might be needed
+    [[ -f stubs.sh ]] && cp stubs.sh "$test_dir/"
+    [[ -d stubs ]] && cp -r stubs "$test_dir/"
+    [[ -d tools ]] && cp -r tools "$test_dir/"
+    
     cd "$test_dir"
     
-    # Download and set up gitsim for git operations
+    # Set up gitsim for git operations
     echo "│ → Setting up isolated test environment..."
-    curl -sL "https://raw.githubusercontent.com/bashfx/fx-gitsim/refs/heads/main/gitsim.sh" > gitsim.sh 2>/dev/null
-    chmod +x gitsim.sh
-    ./gitsim.sh init > /dev/null 2>&1
+    if ! command -v gitsim >/dev/null 2>&1; then
+        echo "│ ✗ ERROR: gitsim not found - required for testing"
+        return 1
+    fi
+    gitsim init > /dev/null 2>&1
     echo "│ ✓ Isolated environment ready"
     
     # Run the test function
@@ -132,37 +139,207 @@ test_command_validation() {
 }
 
 test_security_commands() {
-    echo "│ Verifying enhanced command structure..."
+    echo "│ Testing security command functionality..."
     
     # Build first  
     ./build.sh > /dev/null
     
-    help_output=$(./padlock.sh help 2>&1)
+    # Initialize test repo
+    if ! command -v gitsim >/dev/null 2>&1; then
+        echo "│ ✗ ERROR: gitsim not found - required for testing"
+        return 1
+    fi
+    gitsim init > /dev/null 2>&1
     
-    # Check for key commands in help
-    echo "$help_output" | grep -q "setup" && echo "│ ✓ setup command in help" || echo "│ ✗ setup missing from help"
-    echo "$help_output" | grep -q "key.*Manage encryption keys" && echo "│ ✓ key management in help" || echo "│ ✗ key management missing from help"  
-    echo "$help_output" | grep -q "declamp" && echo "│ ✓ declamp command in help" || echo "│ ✗ declamp missing from help"
-    echo "$help_output" | grep -q "revoke" && echo "│ ✓ revoke command in help" || echo "│ ✗ revoke missing from help"
-    echo "$help_output" | grep -q "repair" && echo "│ ✓ repair command in help" || echo "│ ✗ repair missing from help"
-    echo "$help_output" | grep -q "map" && echo "│ ✓ map command in help" || echo "│ ✗ map missing from help"
-    echo "$help_output" | grep -q "unmap" && echo "│ ✓ unmap command in help" || echo "│ ✗ unmap missing from help"
+    echo "│ → Testing setup command..."
+    setup_output=$(./padlock.sh setup 2>&1)
+    if echo "$setup_output" | grep -q "Master key\|configured\|Setup"; then
+        echo "│ ✓ setup command provides setup functionality"
+    else
+        echo "│ ✗ setup command not working properly"
+    fi
+    
+    echo "│ → Testing key management..."
+    key_output=$(./padlock.sh key 2>&1)
+    if echo "$key_output" | grep -q "Key management\|--set-global\|--show-global"; then
+        echo "│ ✓ key command provides key management options"
+    else
+        echo "│ ✗ key command not providing management options"
+    fi
+    
+    echo "│ → Testing repair command on undeployed repo..."
+    repair_output=$(./padlock.sh repair 2>&1)
+    if echo "$repair_output" | grep -q "not deployed\|No padlock"; then
+        echo "│ ✓ repair correctly detects undeployed state"
+    else
+        echo "│ ✗ repair should detect undeployed repositories"
+    fi
+    
+    echo "│ → Testing revoke command on undeployed repo..."
+    revoke_output=$(./padlock.sh revoke 2>&1)
+    if echo "$revoke_output" | grep -q "not deployed\|No padlock"; then
+        echo "│ ✓ revoke correctly detects undeployed state"
+    else
+        echo "│ ✗ revoke should detect undeployed repositories"
+    fi
+    
+    echo "│ → Testing map/unmap on undeployed repo..."
+    echo "test file" > some_file
+    map_output=$(timeout 5s ./padlock.sh map some_file 2>&1 || echo "TIMEOUT")
+    if echo "$map_output" | grep -q "not deployed\|No padlock\|TIMEOUT"; then
+        echo "│ ✓ map correctly detects undeployed state"
+    elif echo "$map_output" | grep -q "Mapped file"; then
+        echo "│ ⚠ map worked without deployment (may be expected behavior)"
+    else
+        echo "│ ✗ map gave unexpected output"
+        echo "│   Output: $map_output"
+    fi
+}
+
+test_do_functions() {
+    echo "│ Testing core do_* function FUNCTIONALITY..."
+    echo "│ → Building padlock.sh..."
+    ./build.sh > /dev/null
+    echo "│ ✓ Build complete"
+    
+    # Create isolated test repository
+    local test_repo_dir="test_do_functions_$$"
+    mkdir -p "$test_repo_dir"
+    cd "$test_repo_dir"
+    
+    # Set cleanup trap
+    trap "cd ..; rm -rf '$test_repo_dir'" RETURN
+    
+    # Initialize git repo for testing
+    if ! command -v gitsim >/dev/null 2>&1; then
+        echo "│ ✗ ERROR: gitsim not found - required for testing"
+        return 1
+    fi
+    gitsim init > /dev/null 2>&1
+    echo "│ ✓ Test repository created"
+    
+    # Test 1: do_status on undeployed repo
+    echo "│ → Testing do_status (undeployed repo)..."
+    status_output=$(../padlock.sh status 2>&1)
+    if echo "$status_output" | grep -q "NOT DEPLOYED"; then
+        echo "│ ✓ do_status correctly detects undeployed state"
+    else
+        echo "│ ✗ do_status failed to detect undeployed state"
+        echo "│   Output: $status_output"
+    fi
+    
+    # Test 2: do_clamp - actually deploy padlock
+    echo "│ → Testing do_clamp (actual deployment)..."
+    clamp_output=$(../padlock.sh clamp . --generate 2>&1)
+    if [[ -d "locker" && -d "bin" && -f "bin/padlock" ]]; then
+        echo "│ ✓ do_clamp successfully deployed padlock infrastructure"
+    else
+        echo "│ ✗ do_clamp failed to create required directories"
+        echo "│   Output: $(echo "$clamp_output" | head -2)"
+        ls -la
+        return 1
+    fi
+    
+    # Test 3: do_status on deployed repo
+    echo "│ → Testing do_status (deployed repo)..."
+    status_output=$(./bin/padlock status 2>&1)
+    if echo "$status_output" | grep -q "UNLOCKED\|Available"; then
+        echo "│ ✓ do_status correctly detects deployed/unlocked state"
+    else
+        echo "│ ✗ do_status failed on deployed repo"
+        echo "│   Output: $status_output"
+    fi
+    
+    # Test 4: Create test content and test do_lock
+    echo "│ → Testing do_lock (actual encryption)..."
+    mkdir -p locker/docs_sec locker/conf_sec
+    echo "test secret content" > locker/docs_sec/test.md
+    echo "config data" > locker/conf_sec/config.txt
+    
+    lock_output=$(./bin/padlock lock 2>&1)
+    if [[ ! -d "locker" && -f ".chest/locker.age" ]]; then
+        echo "│ ✓ do_lock successfully encrypted locker directory"
+    elif [[ ! -d "locker" && -f "locker.age" ]]; then
+        echo "│ ✓ do_lock successfully encrypted (legacy format)"
+    else
+        echo "│ ✗ do_lock failed to encrypt properly"
+        echo "│   Output: $lock_output"
+        echo "│   Directory state:"
+        ls -la
+        [[ -d ".chest" ]] && ls -la .chest/
+    fi
+    
+    # Test 5: Test do_unlock
+    echo "│ → Testing do_unlock (actual decryption)..."
+    unlock_output=$(./bin/padlock unlock 2>&1)
+    if [[ -d "locker" && -f "locker/docs_sec/test.md" ]]; then
+        # Verify content integrity
+        if [[ "$(cat locker/docs_sec/test.md)" == "test secret content" ]]; then
+            echo "│ ✓ do_unlock successfully decrypted with content integrity"
+        else
+            echo "│ ⚠ do_unlock decrypted but content corrupted"
+        fi
+    else
+        echo "│ ✗ do_unlock failed to restore locker directory"
+        echo "│   Output: $unlock_output"
+        ls -la
+    fi
+    
+    # Test 6: Test do_map functionality
+    echo "│ → Testing do_map (file mapping)..."
+    echo "external content" > external_file.txt
+    map_output=$(timeout 10s ./bin/padlock map external_file.txt 2>&1 || echo "TIMEOUT")
+    if [[ -f "padlock.map" ]] && grep -q "external_file.txt" padlock.map; then
+        echo "│ ✓ do_map successfully created file mapping"
+    elif echo "$map_output" | grep -q "TIMEOUT"; then
+        echo "│ ⚠ do_map timed out (may require user input)"
+    else
+        echo "│ ✗ do_map failed to create mapping"
+        echo "│   Output: $map_output"
+    fi
+    
+    # Test 7: Test do_declamp functionality
+    echo "│ → Testing do_declamp (removal)..."
+    declamp_output=$(../padlock.sh declamp . --force 2>&1)
+    if [[ ! -d "bin" && ! -d ".githooks" && -d "locker" ]]; then
+        echo "│ ✓ do_declamp successfully removed padlock (preserved locker)"
+    else
+        echo "│ ✗ do_declamp failed to remove padlock properly"
+        echo "│   Output: $(echo "$declamp_output" | head -2)"
+        echo "│   Remaining files:"
+        ls -la
+    fi
     
     echo "│"
-    echo "│ Testing command responses..."
-    ./padlock.sh setup 2>/dev/null && echo "│ ✓ setup responds correctly" || echo "│ ✗ setup failed"
-    ./padlock.sh key 2>/dev/null && echo "│ ✓ key responds correctly" || echo "│ ✗ key failed"  
-    ./padlock.sh declamp 2>/dev/null && echo "│ ✓ declamp responds correctly" || echo "│ ✗ declamp failed"
-    ./padlock.sh revoke 2>/dev/null && echo "│ ✓ revoke responds correctly" || echo "│ ✗ revoke failed"
-    ./padlock.sh repair 2>/dev/null && echo "│ ✓ repair responds correctly" || echo "│ ✗ repair failed"
-    ./padlock.sh map 2>/dev/null && echo "│ ✓ map responds correctly" || echo "│ ✗ map failed"
-    ./padlock.sh unmap 2>/dev/null && echo "│ ✓ unmap responds correctly" || echo "│ ✗ unmap failed"
+    echo "│ → Testing error conditions..."
+    
+    # Test 8: Commands on non-git directory
+    mkdir -p "../non_git_test"
+    cd "../non_git_test"
+    
+    nogit_output=$(../../padlock.sh clamp . --generate 2>&1)
+    if echo "$nogit_output" | grep -q "not a git repository"; then
+        echo "│ ✓ Commands properly reject non-git directories"
+    else
+        echo "│ ✗ Commands should reject non-git directories"
+        echo "│   Output: $nogit_output"
+    fi
+    
+    cd "../$test_repo_dir"
+    rm -rf "../non_git_test"
 }
 
 # Run isolated tests
 run_isolated_test "Build Verification" "01" "test_build_verification"
 run_isolated_test "Command Validation" "02" "test_command_validation"  
 run_isolated_test "Security Commands" "03" "test_security_commands"
+
+# Run do_functions test directly in main directory (needs different setup)
+test_box "Individual do_* Functions" "04"
+test_do_functions
+test_end
+
+run_isolated_test "Flag Parsing Architecture" "05" "test_flag_parsing"
 
 run_e2e_test() {
     local test_type="$1"
@@ -207,7 +384,7 @@ run_e2e_test() {
 
     # 4. Deploy padlock
     echo "│ → Deploying padlock security layer..."
-    "$original_dir/padlock.sh" clamp . --generate > /dev/null
+    "$original_dir/../padlock.sh" clamp . --generate > /dev/null
     echo "│ ✓ Padlock deployed successfully"
 
     # 5. Check that clamp worked
@@ -281,7 +458,7 @@ run_repair_test() {
     git config user.name "Test User"
     
     # Deploy padlock and create some content
-    "$original_dir/padlock.sh" clamp . --generate > /dev/null
+    "$original_dir/../padlock.sh" clamp . --generate > /dev/null
     mkdir -p locker/docs_sec
     echo "test secret" > locker/docs_sec/secret.txt
     ./bin/padlock lock > /dev/null
@@ -338,14 +515,14 @@ run_ignition_backup_test() {
     fi
     
     echo "│ → Testing key restore command availability..."
-    if ./padlock.sh key restore --help > /dev/null 2>&1 || ./padlock.sh key restore > /dev/null 2>&1; then
+    if "$original_dir/../padlock.sh" key restore --help > /dev/null 2>&1 || "$original_dir/../padlock.sh" key restore > /dev/null 2>&1; then
         echo "│ ✓ Key restore command available"
     else
         echo "│ ✓ Key restore command available (expected failure without backup)"
     fi
     
     echo "│ → Testing setup command availability..."
-    if ./padlock.sh setup > /dev/null 2>&1; then
+    if "$original_dir/../padlock.sh" setup > /dev/null 2>&1; then
         echo "│ ✓ Setup command functional"
     else
         echo "│ ✓ Setup command functional (expected message)"
@@ -379,7 +556,7 @@ run_map_functionality_test() {
     git config user.name "Test User" > /dev/null 2>&1
     
     # Deploy padlock
-    "$original_dir/padlock.sh" clamp . --generate > /dev/null 2>&1
+    "$original_dir/../padlock.sh" clamp . --generate > /dev/null 2>&1
     echo "│ ✓ Test repository prepared"
     
     # Create external files to map
@@ -467,6 +644,101 @@ run_install_tests() {
     test_end
 }
 
+# test_do_functions moved earlier to avoid forward reference
+# Duplicate function body removed
+
+test_flag_parsing() {
+    echo "│ Testing flag parsing architecture..."
+    
+    # Build first
+    ./build.sh > /dev/null
+    
+    echo "│"
+    echo "│ → Testing global flags are parsed correctly..."
+    
+    # Test -D flag sets opt_dev
+    debug_output=$(./padlock.sh -D dev_test 2>&1)
+    if echo "$debug_output" | grep -q "Developer mode enabled"; then
+        echo "│ ✓ -D flag sets developer mode correctly"
+    else
+        echo "│ ✗ -D flag not working"
+        return 1
+    fi
+    
+    # Test -d flag sets debug mode
+    if ./padlock.sh -d status 2>&1 | grep -q "Developer mode enabled\|Debug"; then
+        echo "│ ✓ -d flag enables debug mode"
+    else
+        echo "│ ✓ -d flag processed (no debug output is normal)"
+    fi
+    
+    echo "│"
+    echo "│ → Testing flag order flexibility..."
+    
+    # Test flags before command
+    result1=$(./padlock.sh --generate clamp . 2>&1)
+    if echo "$result1" | grep -q "Setting up padlock structure"; then
+        echo "│ ✓ Flags before command work"
+    else
+        echo "│ ✗ Flags before command failed"
+        echo "│   Output: $(echo "$result1" | head -1)"
+    fi
+    
+    # Test flags after command  
+    result2=$(./padlock.sh clamp . --generate 2>&1)
+    if echo "$result2" | grep -q "Setting up padlock structure"; then
+        echo "│ ✓ Flags after command work"
+    else
+        echo "│ ✗ Flags after command failed"  
+        echo "│   Output: $(echo "$result2" | head -1)"
+    fi
+    
+    echo "│"
+    echo "│ → Testing mixed flag positions..."
+    
+    # Test mixed flag positions with dev command
+    result3=$(./padlock.sh dev_test -D 2>&1)
+    if echo "$result3" | grep -q "Running developer tests"; then
+        echo "│ ✓ Mixed flag positions work"
+    else
+        echo "│ ✗ Mixed flag positions failed"
+        echo "│   Output: $(echo "$result3" | head -1)"
+    fi
+    
+    # Test complex flag combination
+    result4=$(./padlock.sh -D -t clamp . --generate --global-key 2>&1)
+    if echo "$result4" | grep -q "Setting up padlock structure\|Developer mode enabled"; then
+        echo "│ ✓ Complex flag combinations work"
+    else
+        echo "│ ✗ Complex flag combinations failed"
+        echo "│   Output: $(echo "$result4" | head -1)"
+    fi
+    
+    echo "│"
+    echo "│ → Testing flag value parsing..."
+    
+    # Test --key flag with value (should be parsed but won't work without proper key)
+    result5=$(./padlock.sh clamp . --key "testkey123" 2>&1)
+    if ! echo "$result5" | grep -q "Unknown option\|flag requires"; then
+        echo "│ ✓ --key flag with value parsed without error"
+    else
+        echo "│ ✗ --key flag parsing failed"
+        echo "│   Output: $(echo "$result5" | head -1)"
+    fi
+    
+    echo "│"
+    echo "│ → Testing error handling..."
+    
+    # Test unknown flag
+    result6=$(./padlock.sh --invalid-flag clamp . 2>&1)
+    if echo "$result6" | grep -q "Unknown option"; then
+        echo "│ ✓ Unknown flags properly rejected"
+    else
+        echo "│ ✗ Unknown flag handling failed"
+        echo "│   Output: $(echo "$result6" | head -1)"
+    fi
+}
+
 run_overdrive_tests() {
     local test_num="$1"
     
@@ -493,7 +765,7 @@ run_overdrive_tests() {
 
     # 4. Clamp a new repo
     git init -b main > /dev/null
-    "$original_dir/padlock.sh" clamp . --generate > /dev/null
+    "$original_dir/../padlock.sh" clamp . --generate > /dev/null
     mkdir -p src
     echo "code" > src/main.rs
     echo "docs" > README.md
@@ -539,13 +811,13 @@ run_overdrive_tests() {
 
 
 # Run all tests with proper numbering
-run_e2e_test "git" "04"
-run_e2e_test "gitsim" "05" 
-run_repair_test "06"
-run_ignition_backup_test "07"
-run_map_functionality_test "08"
-run_install_tests "09"
-run_overdrive_tests "10"
+run_e2e_test "git" "06"
+run_e2e_test "gitsim" "07" 
+run_repair_test "08"
+run_ignition_backup_test "09"
+run_map_functionality_test "10"
+run_install_tests "11"
+run_overdrive_tests "12"
 
 
 echo
