@@ -195,9 +195,36 @@ do_status() {
     
     local state="$(_get_lock_state "$repo_root")"
     
+    # Show key availability status
+    echo
+    info "🔑 Key availability:"
+    local master_key_status="❌ Missing"
+    local ignition_backup_status="❌ Missing" 
+    local repo_key_status="❌ Missing"
+    
+    if [[ -f "$PADLOCK_GLOBAL_KEY" ]]; then
+        master_key_status="✓ Available"
+    fi
+    
+    local ignition_backup="$PADLOCK_KEYS/ignition.age"
+    if [[ -f "$ignition_backup" ]]; then
+        ignition_backup_status="✓ Available"
+    fi
+    
+    local repo_name=$(basename "$repo_root")
+    local repo_key="$PADLOCK_KEYS/$repo_name.key"
+    if [[ -f "$repo_key" ]]; then
+        repo_key_status="✓ Available"
+    fi
+    
+    echo "  • Master key:      $master_key_status"
+    echo "  • Ignition backup: $ignition_backup_status"
+    echo "  • Repository key:  $repo_key_status"
+    echo
+    
     case "$state" in
         "unlocked")
-            okay "🔓 UNLOCKED - Secrets accessible in locker/"
+            okay "🔓 UNLOCKED - Padlock deployed, secrets accessible in locker/"
             info "📝 Files ready for editing"
             echo
             printf "%bNext steps:%b\n" "$cyan" "$xx"
@@ -209,12 +236,15 @@ do_status() {
             # Check if it's chest mode or legacy mode
             if [[ -d "$repo_root/.chest" ]]; then
                 if [[ -f "$repo_root/.chest/ignition.age" ]]; then
-                    warn "🗃️  CHEST MODE - Advanced encryption active"
+                    warn "🗃️  LOCKED (CHEST MODE) - Advanced encryption active"
                     info "📦 Ignition key system detected"
                     echo
                     printf "%bNext steps:%b\n" "$cyan" "$xx"
                     echo "  • Run: bin/padlock ignite --unlock"
                     echo "  • With: PADLOCK_IGNITION_PASS=your-key"
+                    if [[ -f "$PADLOCK_GLOBAL_KEY" ]]; then
+                        echo "  • Emergency: padlock master-unlock"
+                    fi
                 else
                     warn "🔒 LOCKED - Secrets encrypted in .chest/locker.age"
                     local size
@@ -222,7 +252,12 @@ do_status() {
                     info "📦 Encrypted size: $size"
                     echo
                     printf "%bNext steps:%b\n" "$cyan" "$xx"
-                    echo "  • To unlock, run: padlock unlock"
+                    if [[ -f "$repo_key" ]]; then
+                        echo "  • To unlock: padlock unlock"
+                    fi
+                    if [[ -f "$PADLOCK_GLOBAL_KEY" ]]; then
+                        echo "  • Emergency: padlock master-unlock"
+                    fi
                 fi
             else
                 warn "🔒 LOCKED - Secrets encrypted in locker.age"
@@ -231,15 +266,35 @@ do_status() {
                 info "📦 Encrypted size: $size"
                 echo
                 printf "%bNext steps:%b\n" "$cyan" "$xx"
-                echo "  • To unlock, run: padlock unlock"
+                if [[ -f "$repo_key" ]]; then
+                    echo "  • To unlock: padlock unlock"
+                fi
+                if [[ -f "$PADLOCK_GLOBAL_KEY" ]]; then
+                    echo "  • Emergency: padlock master-unlock"
+                fi
             fi
             ;;
-        *)
-            error "❓ UNKNOWN STATE - Padlock not properly configured"
+        "unclamped")
+            warn "⚠️  NOT CLAMPED - Locker directory exists but padlock not deployed"
+            info "📁 Found locker/ directory with unprotected files"
             echo
             printf "%bNext steps:%b\n" "$cyan" "$xx"
-            echo "  • Run: bin/padlock setup"
-            echo "  • Or:  padlock clamp . --generate"
+            echo "  • Run: padlock clamp . --generate  (deploy padlock)"
+            echo "  • Or:  padlock setup               (interactive setup)"
+            ;;
+        "not-deployed")
+            info "🚫 NOT DEPLOYED - Padlock not configured in this repository"
+            echo
+            printf "%bNext steps:%b\n" "$cyan" "$xx"
+            echo "  • Run: padlock clamp . --generate  (deploy with new key)"
+            echo "  • Or:  padlock setup               (interactive setup)"
+            ;;
+        *)
+            error "❓ UNKNOWN STATE - Repository in inconsistent state"
+            echo
+            printf "%bNext steps:%b\n" "$cyan" "$xx"
+            echo "  • Run: padlock clamp . --generate  (redeploy padlock)"
+            echo "  • Or:  padlock setup               (interactive setup)"
             ;;
     esac
     

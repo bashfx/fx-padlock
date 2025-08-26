@@ -74,7 +74,20 @@ _get_repo_root() {
 
 _get_lock_state() {
     local repo_root="$1"
-    # Check if unlocked state exists first (locker directory present)
+    
+    # First check if padlock is deployed at all
+    if ! is_deployed "$repo_root"; then
+        # Check if there's a locker directory without proper deployment
+        if [[ -d "$repo_root/locker" ]]; then
+            echo "unclamped"
+        else
+            echo "not-deployed"
+        fi
+        return
+    fi
+    
+    # Padlock is deployed, check actual lock state
+    # Check if unlocked state exists first (locker directory present with .padlock)
     if is_unlocked "$repo_root"; then
         echo "unlocked"
     # Then check for chest mode (chest directory exists)
