@@ -9,7 +9,7 @@
 # Git Repository Security Orchestrator
 #
 # name: padlock
-# version: 1.2.1x
+# version: 1.2.3x
 # author: fx-padlock
 # description: Age-based encryption for git repositories with locker pattern
 # 
