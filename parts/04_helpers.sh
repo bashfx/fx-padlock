@@ -2,6 +2,28 @@
 # Helper Functions - Mid and Low-Level
 ################################################################################
 
+# Portable realpath --relative-to replacement
+_relative_path() {
+    local target="$1"
+    local base="$2"
+    
+    # Convert both to absolute paths
+    target="$(realpath "$target")"
+    base="$(realpath "$base")"
+    
+    # Use Python if available for proper relative path calculation
+    if command -v python3 >/dev/null 2>&1; then
+        python3 -c "import os; print(os.path.relpath('$target', '$base'))"
+    else
+        # Simple fallback - strip base from target if it's a prefix
+        if [[ "$target" == "$base"/* ]]; then
+            echo "${target#"$base"/}"
+        else
+            echo "$target"
+        fi
+    fi
+}
+
 # Guard functions (is_* pattern)
 is_git_repo() {
     local target_dir="${1:-.}"
@@ -52,13 +74,15 @@ _get_repo_root() {
 
 _get_lock_state() {
     local repo_root="$1"
-    # Prioritize chest state if it exists, as it's the more modern format.
-    if [[ -d "$repo_root/.chest" ]]; then
-        echo "locked"
-    elif is_locked "$repo_root"; then # Standard lock file
-        echo "locked"
-    elif is_unlocked "$repo_root"; then
+    # Check if unlocked state exists first (locker directory present)
+    if is_unlocked "$repo_root"; then
         echo "unlocked"
+    # Then check for chest mode (chest directory exists)
+    elif [[ -d "$repo_root/.chest" ]]; then
+        echo "locked"
+    # Check for legacy locked state
+    elif is_locked "$repo_root"; then
+        echo "locked"
     else
         echo "unknown"
     fi
@@ -250,8 +274,8 @@ __encrypt_stream() {
 }
 
 __decrypt_stream() {
-    if [[ -n "${AGE_KEY_FILE:-}" && -f "$AGE_KEY_FILE" ]]; then
-        age -d -i "$AGE_KEY_FILE"
+    if [[ -n "${PADLOCK_KEY_FILE:-}" && -f "$PADLOCK_KEY_FILE" ]]; then
+        age -d -i "$PADLOCK_KEY_FILE"
     elif [[ -n "${AGE_PASSPHRASE:-}" ]]; then
         AGE_PASSPHRASE="$AGE_PASSPHRASE" age -d
     else
@@ -299,7 +323,7 @@ _setup_crypto_with_master() {
     local use_ignition="$2"
     local ignition_key="$3"
 
-    AGE_KEY_FILE="$key_file"
+    PADLOCK_KEY_FILE="$key_file"
 
     if [[ "$use_ignition" == "true" ]]; then
         AGE_PASSPHRASE="$ignition_key"
@@ -458,7 +482,7 @@ _unlock_chest() {
     trace "Decrypted ignition key to temporary file."
 
     # 2. Use the decrypted ignition key to decrypt the locker.
-    export AGE_KEY_FILE="$temp_ignition_key"
+    export PADLOCK_KEY_FILE="$temp_ignition_key"
     export AGE_RECIPIENTS=""
     export AGE_PASSPHRASE=""
 
@@ -521,7 +545,7 @@ _setup_ignition_system() {
 
     # 5. Set up the .padlock config file for future `ignite --lock` operations.
     export AGE_RECIPIENTS="$ignition_public_key"
-    export AGE_KEY_FILE=""
+    export PADLOCK_KEY_FILE=""
     export AGE_PASSPHRASE=""
     __print_padlock_config "$LOCKER_CONFIG" "$(basename "$REPO_ROOT")"
 
@@ -710,7 +734,7 @@ __print_padlock_config() {
 # This file is only present when locker is unlocked
 
 export AGE_RECIPIENTS='${AGE_RECIPIENTS:-}'
-export AGE_KEY_FILE='${AGE_KEY_FILE:-}'
+export PADLOCK_KEY_FILE='${PADLOCK_KEY_FILE:-}'
 export AGE_PASSPHRASE='${AGE_PASSPHRASE:-}'
 export PADLOCK_REPO='$REPO_ROOT'
 

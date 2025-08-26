@@ -88,8 +88,8 @@ encrypt_locker() {
 decrypt_locker() {
     load_config
     
-    if [[ -n "${AGE_KEY_FILE:-}" ]]; then
-        age -d -i "$AGE_KEY_FILE" | tar -xzf - -C "$REPO_ROOT"
+    if [[ -n "${PADLOCK_KEY_FILE:-}" ]]; then
+        age -d -i "$PADLOCK_KEY_FILE" | tar -xzf - -C "$REPO_ROOT"
     elif [[ -n "${AGE_PASSPHRASE:-}" ]]; then
         age -d -p | tar -xzf - -C "$REPO_ROOT"
     else

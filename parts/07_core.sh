@@ -42,6 +42,9 @@ dispatch() {
         list)
             do_list "$@"
             ;;
+        ls)
+            do_ls "$@"
+            ;;
         clean-manifest)
             do_clean_manifest "$@"
             ;;
@@ -50,6 +53,9 @@ dispatch() {
             ;;
         map)
             do_map "$@"
+            ;;
+        automap)
+            do_automap "$@"
             ;;
         unmap)
             do_unmap "$@"
@@ -123,6 +129,7 @@ COMMANDS:
       -K, --ignition [key]  Enable ignition mode for AI collaboration
 
     setup           Setup encryption (first time in repo)
+      ignition      Create ignition backup for master key recovery
     lock            Encrypt locker/ → locker.age
     unlock          Decrypt locker.age → locker/
     status          Show current lock/unlock state with next steps
@@ -159,6 +166,8 @@ COMMANDS:
     Advanced:
     map <path>      Map additional files/dirs for inclusion in chest
       add|remove    Add or remove path from mappings (default: add)
+    automap         Automatically map common sensitive files and directories
+                    (*.md files, build.sh, parts/, .claude, .gemini, .codex, .priv, .sec, *.local.*, *bak*)
     unmap <path|all> Remove files/dirs from mappings (with selection support)
     path [repo]     Show computed storage paths for keys and artifacts
     remote [repo]   Update artifacts for remote namespace (after adding git remote)

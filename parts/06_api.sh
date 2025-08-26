@@ -193,39 +193,55 @@ do_status() {
     
     info "Repository status: $repo_root"
     
-    if [[ -d "$repo_root/locker" && -f "$repo_root/locker/.padlock" ]]; then
-        okay "🔓 UNLOCKED - Secrets accessible in locker/"
-        info "📝 Files ready for editing"
-        echo
-        printf "%bNext steps:%b\n" "$cyan" "$xx"
-        echo "  • Edit files in locker/"
-        echo "  • Run 'git commit' (auto-locks on commit)"
-        echo "  • Manual lock: bin/padlock lock"
-        
-    elif [[ -f "$repo_root/.locked" && -f "$repo_root/locker.age" ]]; then
-        warn "🔒 LOCKED - Secrets encrypted in locker.age"
-        local size
-        size=$(du -h "$repo_root/locker.age" 2>/dev/null | cut -f1 || echo "unknown")
-        info "📦 Encrypted size: $size"
-        echo
-        printf "%bNext steps:%b\n" "$cyan" "$xx"
-        echo "  • To unlock, run: padlock unlock"
-        
-    elif [[ -d "$repo_root/.chest" ]]; then
-        warn "🗃️  CHEST MODE - Advanced encryption active"
-        info "📦 Ignition key system detected"
-        echo
-        printf "%bNext steps:%b\n" "$cyan" "$xx"
-        echo "  • Run: bin/padlock ignite --unlock"
-        echo "  • With: PADLOCK_IGNITION_PASS=your-key"
-        
-    else
-        error "❓ UNKNOWN STATE - Padlock not properly configured"
-        echo
-        printf "%bNext steps:%b\n" "$cyan" "$xx"
-        echo "  • Run: bin/padlock setup"
-        echo "  • Or:  padlock clamp . --generate"
-    fi
+    local state="$(_get_lock_state "$repo_root")"
+    
+    case "$state" in
+        "unlocked")
+            okay "🔓 UNLOCKED - Secrets accessible in locker/"
+            info "📝 Files ready for editing"
+            echo
+            printf "%bNext steps:%b\n" "$cyan" "$xx"
+            echo "  • Edit files in locker/"
+            echo "  • Run 'git commit' (auto-locks on commit)"
+            echo "  • Manual lock: bin/padlock lock"
+            ;;
+        "locked")
+            # Check if it's chest mode or legacy mode
+            if [[ -d "$repo_root/.chest" ]]; then
+                if [[ -f "$repo_root/.chest/ignition.age" ]]; then
+                    warn "🗃️  CHEST MODE - Advanced encryption active"
+                    info "📦 Ignition key system detected"
+                    echo
+                    printf "%bNext steps:%b\n" "$cyan" "$xx"
+                    echo "  • Run: bin/padlock ignite --unlock"
+                    echo "  • With: PADLOCK_IGNITION_PASS=your-key"
+                else
+                    warn "🔒 LOCKED - Secrets encrypted in .chest/locker.age"
+                    local size
+                    size=$(du -h "$repo_root/.chest/locker.age" 2>/dev/null | cut -f1 || echo "unknown")
+                    info "📦 Encrypted size: $size"
+                    echo
+                    printf "%bNext steps:%b\n" "$cyan" "$xx"
+                    echo "  • To unlock, run: padlock unlock"
+                fi
+            else
+                warn "🔒 LOCKED - Secrets encrypted in locker.age"
+                local size
+                size=$(du -h "$repo_root/locker.age" 2>/dev/null | cut -f1 || echo "unknown")
+                info "📦 Encrypted size: $size"
+                echo
+                printf "%bNext steps:%b\n" "$cyan" "$xx"
+                echo "  • To unlock, run: padlock unlock"
+            fi
+            ;;
+        *)
+            error "❓ UNKNOWN STATE - Padlock not properly configured"
+            echo
+            printf "%bNext steps:%b\n" "$cyan" "$xx"
+            echo "  • Run: bin/padlock setup"
+            echo "  • Or:  padlock clamp . --generate"
+            ;;
+    esac
     
     # Show files count if unlocked
     if [[ -d "$repo_root/locker" ]]; then
@@ -268,6 +284,30 @@ do_lock() {
     if [[ -z "${AGE_RECIPIENTS:-}" && -z "${AGE_PASSPHRASE:-}" ]]; then
         error "No encryption method configured (recipients or passphrase)"
         return 1
+    fi
+    
+    # Validate encryption keys before proceeding
+    if [[ -n "${PADLOCK_KEY_FILE:-}" ]]; then
+        if [[ ! -f "$PADLOCK_KEY_FILE" ]]; then
+            error "❌ Repository key not found: $PADLOCK_KEY_FILE"
+            info "Cannot lock without encryption key"
+            return 1
+        fi
+    fi
+    
+    # Check if recipients include master key
+    if [[ -n "${AGE_RECIPIENTS:-}" ]]; then
+        # If using recipients, verify master key exists
+        if [[ ! -f "$PADLOCK_GLOBAL_KEY" ]]; then
+            warn "⚠️  Master key not found: $PADLOCK_GLOBAL_KEY"
+            info "Without master key, you won't be able to use master-unlock"
+            info "Continue anyway? (y/N)"
+            read -r confirm
+            if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
+                info "Lock cancelled for safety"
+                return 1
+            fi
+        fi
     fi
     
     lock "🔒 Encrypting locker directory..."
@@ -333,8 +373,8 @@ do_lock() {
         
         mv "$temp_map" "$map_file"
         
-        # Move map file into locker for encryption
-        cp "$map_file" "locker/padlock.map"
+        # Move map file into locker for encryption (keeps metadata encrypted)
+        mv "$map_file" "locker/padlock.map"
     fi
     
     # Calculate file count before locking
@@ -367,13 +407,32 @@ do_lock() {
         # Create a simple state file to indicate locked status
         touch .chest/.locked
         
-        # Move padlock.map to chest if it exists (keep repo root clean)
-        if [[ -f "$PWD/padlock.map" ]]; then
-            mv "$PWD/padlock.map" ".chest/padlock.map"
-        fi
+        # Note: padlock.map was moved into locker/ before encryption for security
+        # It should not exist in root or be copied to .chest as that would expose metadata
         
 
-        # Remove plaintext locker *after* successful encryption and move
+        # Remove original mapped files/directories before removing locker
+        if [[ -f "locker/padlock.map" ]]; then
+            info "🧹 Removing original mapped files..."
+            while IFS='|' read -r src_rel dest_rel checksum; do
+                # Skip comments and empty lines
+                [[ "$src_rel" =~ ^[[:space:]]*# ]] && continue
+                [[ -z "$src_rel" ]] && continue
+                
+                local src_abs="$PWD/$src_rel"
+                if [[ -e "$src_abs" ]]; then
+                    if [[ -f "$src_abs" ]]; then
+                        rm -f "$src_abs"
+                        trace "Removed mapped file: $src_rel"
+                    elif [[ -d "$src_abs" ]]; then
+                        rm -rf "$src_abs"
+                        trace "Removed mapped directory: $src_rel"
+                    fi
+                fi
+            done < "locker/padlock.map"
+        fi
+
+        # Remove plaintext locker *after* successful encryption and cleanup
         rm -rf locker
         
         info "Repository locked successfully."
@@ -424,7 +483,7 @@ do_unlock() {
     fi
 
     # Determine key file path, preferring env var if set, otherwise derive it
-    local key_file="${AGE_KEY_FILE:-}"
+    local key_file="${PADLOCK_KEY_FILE:-}"
     if [[ -z "$key_file" ]]; then
         local repo_root
         repo_root=$(_get_repo_root .)
@@ -433,12 +492,12 @@ do_unlock() {
         if [[ ! -f "$key_file" ]]; then
             error "Could not find default decryption key for this repository."
             info "Looked for key at: $key_file"
-            info "You can also set the AGE_KEY_FILE environment variable manually."
+            info "You can also set the PADLOCK_KEY_FILE environment variable manually."
             return 1
         fi
         trace "Using derived repository key: $key_file"
     else
-        trace "Using key from AGE_KEY_FILE env var: $key_file"
+        trace "Using key from PADLOCK_KEY_FILE env var: $key_file"
     fi
 
     lock "🔓 Decrypting $locker_age_file..."
@@ -473,51 +532,64 @@ do_unlock() {
 
         # Restore mapped files from locker/map to their original locations
         if [[ -f "locker/padlock.map" ]]; then
-            info "📋 Restoring mapped files..."
+            info "📋 Restoring mapped files to original locations..."
+            local restored_count=0
             
             while IFS='|' read -r src_rel dest_rel checksum; do
                 # Skip comments and empty lines
                 [[ "$src_rel" =~ ^[[:space:]]*# ]] && continue
                 [[ -z "$src_rel" ]] && continue
                 
-                local mapped_file="locker/map/$src_rel"
+                local stored_file="locker/map/$src_rel"
                 local restore_path="$PWD/$dest_rel"
                 
-                if [[ -f "$mapped_file" ]]; then
+                if [[ -f "$stored_file" ]]; then
                     # Restore regular file
                     mkdir -p "$(dirname "$restore_path")"
-                    cp "$mapped_file" "$restore_path"
-                    trace "Restored file: $dest_rel"
-                elif [[ -f "locker/map/$(dirname "$src_rel")/$(basename "$src_rel").tar.gz" ]]; then
-                    # Restore directory from tar.gz
-                    local tar_file="locker/map/$(dirname "$src_rel")/$(basename "$src_rel").tar.gz"
-                    local dest_parent="$(dirname "$restore_path")"
-                    mkdir -p "$dest_parent"
+                    cp "$stored_file" "$restore_path"
+                    okay "✓ Restored file: $dest_rel"
+                    ((restored_count++))
+                elif [[ -f "locker/map/$(basename "$src_rel").tar.gz" ]] || [[ -f "locker/map/$(dirname "$src_rel")/$(basename "$src_rel").tar.gz" ]]; then
+                    # Find the tar file (could be in map root or subdirectory)
+                    local tar_file=""
+                    if [[ -f "locker/map/$(basename "$src_rel").tar.gz" ]]; then
+                        tar_file="locker/map/$(basename "$src_rel").tar.gz"
+                    else
+                        tar_file="locker/map/$(dirname "$src_rel")/$(basename "$src_rel").tar.gz"
+                    fi
                     
-                    (cd "$dest_parent" && tar -xzf "$PWD/$tar_file")
-                    trace "Restored directory: $dest_rel"
+                    # Extract directly to repository root
+                    if tar -xzf "$tar_file" -C "$PWD" 2>/dev/null; then
+                        okay "✓ Restored directory: $dest_rel"
+                        ((restored_count++))
+                    else
+                        warn "Failed to extract: $tar_file"
+                    fi
+                else
+                    warn "Mapped item not found in locker/map, skipping: $src_rel"
                 fi
             done < "locker/padlock.map"
             
-            # Move padlock.map back to root and remove from locker
+            # Move padlock.map back to root
             cp "locker/padlock.map" "padlock.map"
             rm -f "locker/padlock.map"
             
             # Clean up map directory from locker
             rm -rf "locker/map"
-        fi
-
-        # Restore padlock.map from chest if it exists there
-        if [[ -f ".chest/padlock.map" ]]; then
-            cp ".chest/padlock.map" "padlock.map"
+            
+            if [[ $restored_count -gt 0 ]]; then
+                info "📁 Restored $restored_count mapped items to original locations"
+            fi
         fi
 
         # Clean up encrypted file and state indicators
         rm -f "$locker_age_file" "$locked_file" "$checksum_file"
         
-        # Remove .chest directory if it's empty
-        if [[ -d ".chest" ]] && [[ -z "$(ls -A .chest 2>/dev/null)" ]]; then
-            rmdir ".chest"
+        # Remove .chest directory when unlocked (should be empty after cleanup)
+        if [[ -d ".chest" ]]; then
+            # Force removal of any remaining files in .chest and the directory itself
+            rm -rf ".chest"
+            trace "Removed .chest directory"
         fi
 
         info "Repository unlocked successfully. Your shell session is not affected."
@@ -594,6 +666,62 @@ do_list() {
         *)
             # Default: exclude temp directories, show namespace/name/path
             awk -F'|' '!/^#/ && $9 !~ /temp=true/ && $3 !~ /\/tmp\// { printf "%-15s %-20s %s (%s)\n", $1, $2, $3, $4 }' "$manifest_file"
+            ;;
+    esac
+}
+
+do_ls() {
+    local target="${1:-}"
+    
+    case "$target" in
+        master)
+            # Show master key path and status
+            info "🔑 Master key information:"
+            echo
+            if [[ -f "$PADLOCK_GLOBAL_KEY" ]]; then
+                okay "✓ Master key exists: $PADLOCK_GLOBAL_KEY"
+                local key_size
+                key_size=$(wc -c < "$PADLOCK_GLOBAL_KEY" 2>/dev/null)
+                trace "   Size: $key_size bytes"
+                
+                # Show creation time if available
+                if command -v stat >/dev/null 2>&1; then
+                    local created
+                    if stat --version >/dev/null 2>&1; then
+                        # GNU stat
+                        created=$(stat -c %y "$PADLOCK_GLOBAL_KEY" 2>/dev/null | cut -d. -f1)
+                    else
+                        # BSD stat (macOS)
+                        created=$(stat -f "%Sm" "$PADLOCK_GLOBAL_KEY" 2>/dev/null)
+                    fi
+                    [[ -n "$created" ]] && trace "   Created: $created"
+                fi
+                
+                # Show public key
+                if command -v age-keygen >/dev/null 2>&1; then
+                    local pubkey
+                    pubkey=$(age-keygen -y "$PADLOCK_GLOBAL_KEY" 2>/dev/null || echo "Unable to read")
+                    info "🔐 Public key: $pubkey"
+                fi
+            else
+                error "❌ Master key not found: $PADLOCK_GLOBAL_KEY"
+                info "Create with: padlock key --generate-global"
+            fi
+            
+            # Check for ignition backup
+            local ignition_backup="$PADLOCK_KEYS/ignition.age"
+            if [[ -f "$ignition_backup" ]]; then
+                okay "🔥 Ignition backup exists: $ignition_backup"
+            else
+                warn "⚠️  No ignition backup found: $ignition_backup"
+                info "Create with: padlock setup (in interactive mode)"
+            fi
+            ;;
+        *)
+            error "Unknown ls target: $target"
+            info "Available targets:"
+            info "  master  - Show master key path and status"
+            return 1
             ;;
     esac
 }
@@ -842,6 +970,16 @@ _add_to_manifest() {
 
 # Master unlock command
 do_master_unlock() {
+    # Check if already unlocked
+    local repo_root="$(_get_repo_root .)"
+    local state="$(_get_lock_state "$repo_root")"
+    
+    if [[ "$state" == "unlocked" ]]; then
+        warn "⚠️  Repository is already unlocked"
+        info "📁 Locker directory exists and is accessible"
+        return 0
+    fi
+    
     lock "🔑 Unlocking with master key..."
     if ! _master_unlock; then
         return 1
@@ -863,25 +1001,98 @@ _master_unlock() {
         return 1
     fi
 
-    # Early validation for locker.age
-    if [[ ! -f "locker.age" ]]; then
-        error "No encrypted locker found (locker.age missing)."
-        info "Cannot perform master unlock without locker.age."
+    local encrypted_file=""
+    local is_chest_mode=false
+    
+    # Check for chest mode first, then legacy mode
+    if [[ -f ".chest/locker.age" ]]; then
+        encrypted_file=".chest/locker.age"
+        is_chest_mode=true
+        info "Found chest mode encrypted locker"
+    elif [[ -f "locker.age" ]]; then
+        encrypted_file="locker.age"
+        info "Found legacy mode encrypted locker"
+    else
+        error "No encrypted locker found (locker.age or .chest/locker.age missing)."
+        info "Cannot perform master unlock without encrypted locker."
         return 1
     fi
 
     # Use the global key for decryption by setting AGE_KEY_FILE for __decrypt_stream
-    export AGE_KEY_FILE="$PADLOCK_GLOBAL_KEY"
+    export PADLOCK_KEY_FILE="$PADLOCK_GLOBAL_KEY"
 
     info "Attempting decryption with master key..."
-    if __decrypt_stream < locker.age | tar -xzf -; then
-        rm -f locker.age .locked
-        info "Successfully unlocked with master key."
-        unset AGE_KEY_FILE
+    if __decrypt_stream < "$encrypted_file" | tar -xzf -; then
+        local file_count
+        file_count=$(find locker -type f | wc -l)
+        okay "✓ Unlocked: $encrypted_file → locker/ ($file_count files)"
+        
+        # Restore mapped files from locker/map to their original locations
+        if [[ -f "locker/padlock.map" ]]; then
+            info "📋 Restoring mapped files to original locations..."
+            local restored_count=0
+            
+            while IFS='|' read -r src_rel dest_rel checksum; do
+                # Skip comments and empty lines
+                [[ "$src_rel" =~ ^[[:space:]]*# ]] && continue
+                [[ -z "$src_rel" ]] && continue
+                
+                local stored_file="locker/map/$src_rel"
+                local restore_path="$PWD/$dest_rel"
+                
+                if [[ -f "$stored_file" ]]; then
+                    # Restore regular file
+                    mkdir -p "$(dirname "$restore_path")"
+                    cp "$stored_file" "$restore_path"
+                    okay "✓ Restored file: $dest_rel"
+                    ((restored_count++))
+                elif [[ -f "locker/map/$(basename "$src_rel").tar.gz" ]] || [[ -f "locker/map/$(dirname "$src_rel")/$(basename "$src_rel").tar.gz" ]]; then
+                    # Find the tar file (could be in map root or subdirectory)
+                    local tar_file=""
+                    if [[ -f "locker/map/$(basename "$src_rel").tar.gz" ]]; then
+                        tar_file="locker/map/$(basename "$src_rel").tar.gz"
+                    else
+                        tar_file="locker/map/$(dirname "$src_rel")/$(basename "$src_rel").tar.gz"
+                    fi
+                    
+                    # Extract directly to repository root
+                    if tar -xzf "$tar_file" -C "$PWD" 2>/dev/null; then
+                        okay "✓ Restored directory: $dest_rel"
+                        ((restored_count++))
+                    else
+                        warn "Failed to extract: $tar_file"
+                    fi
+                else
+                    warn "Mapped item not found in locker/map, skipping: $src_rel"
+                fi
+            done < "locker/padlock.map"
+            
+            # Move padlock.map back to root
+            cp "locker/padlock.map" "padlock.map"
+            rm -f "locker/padlock.map"
+            
+            # Clean up map directory from locker
+            rm -rf "locker/map"
+            
+            if [[ $restored_count -gt 0 ]]; then
+                info "📁 Restored $restored_count mapped items to original locations"
+            fi
+        fi
+        
+        if [[ "$is_chest_mode" == true ]]; then
+            # In chest mode, remove the entire .chest directory after successful unlock
+            rm -rf .chest
+            info "Successfully unlocked chest with master key."
+        else
+            # In legacy mode, remove the encrypted file and lock marker
+            rm -f locker.age .locked
+            info "Successfully unlocked with master key."
+        fi
+        unset PADLOCK_KEY_FILE
         return 0
     else
-        error "Failed to decrypt locker.age with master key."
-        unset AGE_KEY_FILE
+        error "Failed to decrypt encrypted locker with master key."
+        unset PADLOCK_KEY_FILE
         return 1
     fi
 }
@@ -1385,7 +1596,7 @@ _overdrive_unlock() {
         info "Ensure your master key is available at $PADLOCK_GLOBAL_KEY"
         return 1
     fi
-    export AGE_KEY_FILE="$PADLOCK_GLOBAL_KEY"
+    export PADLOCK_KEY_FILE="$PADLOCK_GLOBAL_KEY"
 
     local super_chest="$REPO_ROOT/.super_chest"
     if ! __decrypt_stream < "$REPO_ROOT/super_chest.age" | tar -C "$REPO_ROOT" -xzf -; then
@@ -1610,20 +1821,45 @@ do_key() {
 }
 
 do_setup() {
-    _logo
-    info "🔧 Padlock Interactive Setup"
-    echo
+    local subcommand="${1:-}"
     
-    if [[ -f "$PADLOCK_GLOBAL_KEY" ]]; then
-        okay "✓ Master key already exists"
-        info "Your padlock is already configured."
-        echo
-        info "Available commands:"
-        info "  padlock clamp <dir>    - Deploy to a new repository"
-        info "  padlock key restore    - Restore from ignition backup"
-        info "  padlock --help         - Show all commands"
-        return 0
-    fi
+    case "$subcommand" in
+        ignition)
+            # Direct ignition backup creation
+            _create_ignition_backup
+            return $?
+            ;;
+        *)
+            # Default interactive setup
+            _logo
+            info "🔧 Padlock Interactive Setup"
+            echo
+            
+            if [[ -f "$PADLOCK_GLOBAL_KEY" ]]; then
+                okay "✓ Master key already exists"
+                
+                # Check if ignition backup exists
+                local ignition_backup="$PADLOCK_KEYS/ignition.age"
+                if [[ -f "$ignition_backup" ]]; then
+                    okay "✓ Ignition backup exists"
+                    info "Your padlock is fully configured."
+                    echo
+                    info "Available commands:"
+                    info "  padlock clamp <dir>       - Deploy to a new repository"
+                    info "  padlock setup ignition    - Recreate ignition backup"
+                    info "  padlock key restore       - Restore from ignition backup"
+                    info "  padlock --help            - Show all commands"
+                    return 0
+                else
+                    warn "⚠️  Ignition backup is missing"
+                    info "Creating ignition backup from existing master key..."
+                    echo
+                    _create_ignition_backup
+                    return $?
+                fi
+            fi
+            ;;
+    esac
     
     echo "This will set up padlock encryption with a master key and ignition backup."
     echo "The ignition backup allows you to recover your master key if lost."
@@ -1780,7 +2016,7 @@ do_repair() {
         if [[ -n "$recipients" ]]; then
             # Set up environment for config generation
             export AGE_RECIPIENTS="$recipients"
-            export AGE_KEY_FILE="$key_file"
+            export PADLOCK_KEY_FILE="$key_file"
             export AGE_PASSPHRASE=""
             export REPO_ROOT="$repo_path"
             
@@ -1887,7 +2123,8 @@ do_declamp() {
     lock "🔓 Safely declamping padlock from repository..."
     
     # Ensure repository is unlocked first
-    if [[ -f "$REPO_ROOT/locker.age" ]] || [[ -d "$REPO_ROOT/.chest" ]]; then
+    local state="$(_get_lock_state "$REPO_ROOT")"
+    if [[ "$state" == "locked" ]]; then
         if [[ "$force" != "--force" ]]; then
             error "Repository is locked. Unlock first or use --force"
             info "To unlock: padlock unlock"
@@ -1902,10 +2139,10 @@ do_declamp() {
             if ! (cd "$REPO_ROOT" && "$REPO_ROOT/bin/padlock" unlock); then
                 fatal "Failed to unlock repository for declamp"
             fi
-        elif [[ -d "$REPO_ROOT/.chest" ]]; then
+        elif [[ -f "$REPO_ROOT/.chest/locker.age" ]]; then
             info "Unlocking chest mode..."
-            if ! (cd "$REPO_ROOT" && "$REPO_ROOT/bin/padlock" ignite --unlock); then
-                fatal "Failed to unlock chest for declamp"
+            if ! (cd "$REPO_ROOT" && "$REPO_ROOT/bin/padlock" unlock); then
+                fatal "Failed to unlock repository for declamp"
             fi
         fi
     fi
@@ -2261,6 +2498,156 @@ EOF
     esac
     
     info "💡 Changes take effect on next lock operation"
+}
+
+do_automap() {
+    local repo_root="$(_get_repo_root .)"
+    local map_file="$repo_root/padlock.map"
+    
+    info "🤖 Auto-detecting files and directories for mapping..."
+    
+    # Create map file if it doesn't exist
+    if [[ ! -f "$map_file" ]]; then
+        cat > "$map_file" << 'EOF'
+# Padlock File Mapping
+# Format: source_path|destination_path|md5_checksum
+# Paths are relative to repository root
+# Files listed here will be included in encrypted chest
+EOF
+    fi
+    
+    local mapped_count=0
+    local skipped_count=0
+    
+    # Auto-detect patterns
+    local patterns=(
+        # Markdown files (except README and SECURITY, case insensitive)
+        "*.md"
+        # Build and parts directory
+        "build.sh"
+        "parts"
+        # AI/IDE directories
+        ".claude" ".gemini" ".codex" ".priv" ".sec"
+        # Local and backup files in root
+        "*.local.*" "*bak*"
+    )
+    
+    # Function to check if already mapped
+    _is_mapped() {
+        local path="$1"
+        grep -q "^$path|" "$map_file" 2>/dev/null
+    }
+    
+    # Function to check if file should be excluded
+    _should_exclude() {
+        local path="$1"
+        local basename_lower
+        basename_lower=$(basename "$path" | tr '[:upper:]' '[:lower:]')
+        
+        # Exclude README.md and SECURITY.md (case insensitive)
+        case "$basename_lower" in
+            readme.md|security.md)
+                return 0
+                ;;
+        esac
+        
+        # Exclude padlock infrastructure
+        case "$path" in
+            .git/*|bin/*|.githooks/*|locker.age|.locked|.chest/*|super_chest.age|.overdrive|padlock.map|locker/*)
+                return 0
+                ;;
+        esac
+        
+        return 1
+    }
+    
+    # Function to add mapping
+    _add_automap() {
+        local src_path="$1"
+        local src_abs="$repo_root/$src_path"
+        
+        # Skip if already mapped
+        if _is_mapped "$src_path"; then
+            trace "Already mapped: $src_path"
+            ((skipped_count++))
+            return 0
+        fi
+        
+        # Skip if should be excluded
+        if _should_exclude "$src_path"; then
+            trace "Excluded: $src_path"
+            ((skipped_count++))
+            return 0
+        fi
+        
+        # Calculate checksum
+        local checksum=""
+        if [[ -f "$src_abs" ]]; then
+            checksum=$(md5sum "$src_abs" | cut -d' ' -f1)
+        elif [[ -d "$src_abs" ]]; then
+            checksum=$(find "$src_abs" -type f -exec md5sum {} \; | sort | md5sum | cut -d' ' -f1)
+        fi
+        
+        # Add mapping
+        echo "$src_path|$src_path|$checksum" >> "$map_file"
+        ((mapped_count++))
+        
+        if [[ -f "$src_abs" ]]; then
+            okay "✓ Auto-mapped file: $src_path"
+        elif [[ -d "$src_abs" ]]; then
+            okay "✓ Auto-mapped directory: $src_path"
+            local file_count
+            file_count=$(find "$src_abs" -type f | wc -l)
+            trace "  📁 Contains $file_count files"
+        fi
+    }
+    
+    # Process each pattern
+    for pattern in "${patterns[@]}"; do
+        case "$pattern" in
+            "*.md")
+                # Find all .md files in root, exclude README.md and SECURITY.md
+                while IFS= read -r -d '' file; do
+                    local rel_path
+                    rel_path=$(realpath --relative-to="$repo_root" "$file")
+                    _add_automap "$rel_path"
+                done < <(find "$repo_root" -maxdepth 1 -name "*.md" -type f -print0)
+                ;;
+            "*.local.*"|"*bak*")
+                # Find files matching these patterns in root
+                while IFS= read -r -d '' file; do
+                    local rel_path
+                    rel_path=$(realpath --relative-to="$repo_root" "$file")
+                    _add_automap "$rel_path"
+                done < <(find "$repo_root" -maxdepth 1 -name "$pattern" -type f -print0)
+                ;;
+            *)
+                # Check if file/directory exists
+                if [[ -e "$repo_root/$pattern" ]]; then
+                    _add_automap "$pattern"
+                fi
+                ;;
+        esac
+    done
+    
+    # Backup the updated map file
+    _backup_repo_artifacts "$repo_root"
+    
+    # Summary
+    echo
+    if [[ $mapped_count -gt 0 ]]; then
+        okay "🎯 Auto-mapped $mapped_count items"
+        if [[ $skipped_count -gt 0 ]]; then
+            info "⏩ Skipped $skipped_count items (already mapped or excluded)"
+        fi
+        info "💡 Changes take effect on next lock operation"
+        info "💡 Review mappings with: padlock map"
+    else
+        info "📝 No new items found to auto-map"
+        if [[ $skipped_count -gt 0 ]]; then
+            info "⏩ $skipped_count items were skipped (already mapped or excluded)"
+        fi
+    fi
 }
 
 # Unmap files with support for file selection
@@ -2813,7 +3200,7 @@ _revoke_ignition_access() {
         master_public=$(age-keygen -y "$PADLOCK_GLOBAL_KEY")
         
         export AGE_RECIPIENTS="$new_public,$master_public"
-        export AGE_KEY_FILE="$new_repo_key"
+        export PADLOCK_KEY_FILE="$new_repo_key"
         export AGE_PASSPHRASE=""
         
         __print_padlock_config "$REPO_ROOT/locker/.padlock" "$(basename "$REPO_ROOT")"

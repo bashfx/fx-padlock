@@ -14,8 +14,8 @@ readonly SCRIPT_PATH="$(realpath "${BASH_SOURCE[0]}")"
 readonly SCRIPT_NAME="$(basename "$SCRIPT_PATH")"
 readonly SCRIPT_DIR="$(dirname "$SCRIPT_PATH")"
 
-# Padlock configuration
-readonly PADLOCK_VERSION="1.0.0"
+# Padlock configuration - extract version from header
+readonly PADLOCK_VERSION="$(grep "^# version:" "$SCRIPT_PATH" 2>/dev/null | sed 's/^# version:[[:space:]]*//' || echo "unknown")"
 readonly PADLOCK_ETC="$XDG_ETC_HOME/padlock"
 readonly PADLOCK_KEYS="$PADLOCK_ETC/keys"
 readonly PADLOCK_GLOBAL_KEY="$PADLOCK_KEYS/global.key"
