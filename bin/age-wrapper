@@ -1,0 +1,76 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+_find_root() {
+    local dir="$PWD"
+    while [[ "$dir" != "/" ]]; do
+        if [[ -d "$dir/.git" ]] || [[ -d "$dir/.gitsim" ]]; then
+            echo "$dir"
+            return 0
+        fi
+        dir=$(dirname "$dir")
+    done
+    if [[ -d "$dir/.git" ]] || [[ -d "$dir/.gitsim" ]]; then echo "$dir"; return 0; fi
+    return 1
+}
+
+MODE="${1:-}"
+REPO_ROOT="$(_find_root)"
+CRYPTO_CONFIG="$REPO_ROOT/locker/.padlock"
+LOCKER_DIR="$REPO_ROOT/locker"
+LOCKER_BLOB="$REPO_ROOT/locker.age"
+
+load_config() {
+    if [[ -f "$CRYPTO_CONFIG" ]]; then
+        source "$CRYPTO_CONFIG"
+    else
+        if [[ -z "${AGE_RECIPIENTS:-}${AGE_PASSPHRASE:-}" ]]; then
+            echo "✗ No crypto config. Run: bin/padlock setup" >&2
+            exit 1
+        fi
+    fi
+}
+
+encrypt_locker() {
+    if [[ ! -d "$LOCKER_DIR" ]]; then
+        echo "No locker directory found" >&2
+        exit 1
+    fi
+    
+    load_config
+    
+    if [[ -n "${AGE_RECIPIENTS:-}" ]]; then
+        tar -czf - -C "$REPO_ROOT" locker | age -r "$AGE_RECIPIENTS"
+    elif [[ -n "${AGE_PASSPHRASE:-}" ]]; then
+        tar -czf - -C "$REPO_ROOT" locker | age -p
+    else
+        echo "No encryption method configured" >&2
+        exit 1
+    fi
+}
+
+decrypt_locker() {
+    load_config
+    
+    if [[ -n "${PADLOCK_KEY_FILE:-}" ]]; then
+        age -d -i "$PADLOCK_KEY_FILE" | tar -xzf - -C "$REPO_ROOT"
+    elif [[ -n "${AGE_PASSPHRASE:-}" ]]; then
+        age -d -p | tar -xzf - -C "$REPO_ROOT"
+    else
+        echo "No decryption method available" >&2
+        exit 1
+    fi
+}
+
+case "$MODE" in
+    encrypt)
+        encrypt_locker
+        ;;
+    decrypt)
+        decrypt_locker
+        ;;
+    *)
+        echo "Usage: $0 {encrypt|decrypt}" >&2
+        exit 1
+        ;;
+esac

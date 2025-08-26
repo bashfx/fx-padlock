@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# Post-merge hook: Refresh locker after merge
+
+_find_root() {
+    local dir="$PWD"
+    while [[ "$dir" != "/" ]]; do
+        if [[ -d "$dir/.git" ]] || [[ -d "$dir/.gitsim" ]]; then
+            echo "$dir"
+            return 0
+        fi
+        dir=$(dirname "$dir")
+    done
+    if [[ -d "$dir/.git" ]] || [[ -d "$dir/.gitsim" ]]; then echo "$dir"; return 0; fi
+    return 1
+}
+
+REPO_ROOT="$(_find_root)"
+LOCKER_BLOB="$REPO_ROOT/locker.age"
+
+if [[ -f "$LOCKER_BLOB" ]] && [[ -d "$REPO_ROOT/locker" ]]; then
+    echo "🔄 Refreshing locker after merge..."
+    if "$REPO_ROOT/bin/padlock" unlock 2>/dev/null; then
+        echo "✓ Locker refreshed successfully"
+    else
+        echo "ⓘ Manual refresh needed (use: padlock unlock)"
+    fi
+fi
+
+exit 0
