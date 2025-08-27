@@ -30,6 +30,9 @@ dispatch() {
         master-unlock)
             do_master_unlock "$@"
             ;;
+        master)
+            do_master "$@"
+            ;;
         ignite)
             do_ignite "$@"
             ;;
@@ -48,14 +51,26 @@ dispatch() {
         declamp)
             do_declamp "$@"
             ;;
+        release)
+            do_declamp "$@"  # Alias for declamp
+            ;;
         map)
             do_map "$@"
+            ;;
+        sec)
+            do_sec "$@"  # File security mini-dispatcher
             ;;
         automap)
             do_automap "$@"
             ;;
+        autosec)
+            do_automap "$@"  # Auto-secure (new name for automap)
+            ;;
         unmap)
             do_unmap "$@"
+            ;;
+        dec)
+            do_unmap "$@"  # De-secure file (new name for unmap)
             ;;
         path)
             do_path "$@"
@@ -125,25 +140,54 @@ COMMANDS:
       --key <key>    Use explicit key
       -K, --ignition [key]  Enable ignition mode for AI collaboration
 
-    setup           Setup encryption (first time in repo)
-      ignition      Create ignition backup for master key recovery
+    # Daily Operations
     lock            Encrypt locker/ → locker.age
     unlock          Decrypt locker.age → locker/
     status          Show current lock/unlock state with next steps
+    release <path>  Remove padlock from repository (same as declamp)
 
-    master-unlock   Emergency unlock using global master key
+    # Master Key Management
+    master          Master key operations
+      generate       Generate new global master key
+      show           Display master public key  
+      restore        Restore master key from skull backup
+      unlock         Emergency unlock using master key
+
+    # Key Testing & Management
+    key             Advanced key operations
+      is <type> --key=PATH          Test if key is specific type
+      authority --key1=X --key2=Y   Test authority relationship
+      subject --key1=X --key2=Y     Test subject relationship
+      type --key=/path              Identify key type
+      --set-global <key>            Store global key (legacy)
+      --show-global                 Display global key (legacy)
+
+    # File Security
+    sec             File security operations
+      <path>         Secure file (default: add to mapping)
+      add <path>     Add file to security mapping
+      remove <path>  Remove file from security mapping  
+      auto           Auto-secure sensitive files
+    dec <path>      De-secure file (remove from mapping)
+
+    # Access Management
+    rotate          Rotate keys (requires predicate)
+      master         Rotate global master key (affects all repos)
+      ignition [name] Rotate ignition key (invalidates distributed keys)
+      distro <name>  Rotate specific distributed key
+
+    revoke          Revoke access (requires predicate)  
+      ignition [name] Revoke ignition key
+      distro <name>   Revoke specific distributed key
+
+    # Ignition System (Third-Party Access)
     ignite          Ignition key operations
-      --unlock       Unlock chest with ignition key
-      --lock         Lock locker into chest
-      --status       Show chest status
-    rotate          Rotate keys
-      --ignition     Rotate the ignition key passphrase
-
-    key             Manage encryption keys
-      --set-global <key>      Store global key
-      --show-global           Display global key
-      --generate-global       Create new global key
-      restore                 Restore master key from ignition backup
+      create [name]  Create repo-ignition master key
+      new --name=X   Create distributed key for third parties
+      unlock [name]  Unlock using distributed key + PADLOCK_IGNITION_PASS
+      allow <pubkey> Grant access to public key
+      list           List ignition keys
+      status         Show ignition system status
 
     install         Install padlock to your system for global access
     uninstall       Remove padlock from your system

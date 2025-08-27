@@ -135,12 +135,12 @@ _verify_unlock_capability() {
     fi
     
     # Check 3: Ignition backup exists
-    local ignition_backup="$PADLOCK_KEYS/ignition.age"
-    if [[ -f "$ignition_backup" ]]; then
+    local skull_backup="$PADLOCK_KEYS/skull.age"
+    if [[ -f "$skull_backup" ]]; then
         okay "✓ Ignition backup available for key recovery"
     else
         ((warnings++))
-        warn "⚠️  No ignition backup for emergency recovery"
+        warn "⚠️  No skull key backup for emergency recovery"
     fi
     
     # Check 4: If in ignition mode, verify setup
@@ -781,8 +781,8 @@ _ensure_master_key() {
         chmod 600 "$PADLOCK_GLOBAL_KEY"
         okay "✓ Global master key created at: $PADLOCK_GLOBAL_KEY"
         
-        # Create passphrase-encrypted ignition backup
-        _create_ignition_backup
+        # Create passphrase-encrypted skull backup
+        _create_skull_backup
         
         warn "⚠️  This key is your ultimate backup. Keep it safe."
     else
@@ -790,24 +790,24 @@ _ensure_master_key() {
     fi
 }
 
-_create_ignition_backup() {
-    local ignition_backup="$PADLOCK_KEYS/ignition.age"
+_create_skull_backup() {
+    local skull_backup="$PADLOCK_KEYS/skull.age"
     
-    # Skip if ignition backup already exists
-    if [[ -f "$ignition_backup" ]]; then
+    # Skip if skull backup already exists
+    if [[ -f "$skull_backup" ]]; then
         trace "Ignition backup already exists."
         return 0
     fi
     
     # Skip if not in interactive terminal (automated testing/CI)
     if [[ ! -t 0 ]] || [[ ! -t 1 ]]; then
-        trace "Non-interactive environment detected, skipping ignition backup creation."
+        trace "Non-interactive environment detected, skipping skull backup creation."
         warn "⚠️  Ignition backup not created (non-interactive environment)"
-        info "💡 Run 'padlock setup' interactively to create ignition backup"
+        info "💡 Run 'padlock setup' interactively to create skull backup"
         return 0
     fi
     
-    info "🔥 Creating ignition backup system..."
+    info "💀 Creating skull key backup system..."
     echo "Enter a memorable passphrase to encrypt your master key backup:"
     echo "(This allows recovery if your master key file is lost)"
     
@@ -832,13 +832,13 @@ _create_ignition_backup() {
     done
     
     # Encrypt the master key with the passphrase
-    if AGE_PASSPHRASE="$passphrase" age -p < "$PADLOCK_GLOBAL_KEY" > "$ignition_backup"; then
-        chmod 600 "$ignition_backup"
-        okay "✓ Ignition backup created: $ignition_backup"
+    if AGE_PASSPHRASE="$passphrase" age -p < "$PADLOCK_GLOBAL_KEY" > "$skull_backup"; then
+        chmod 600 "$skull_backup"
+        okay "✓ Skull key backup created: $skull_backup"
         info "💡 To restore master key: padlock key restore"
     else
-        error "Failed to create ignition backup"
-        rm -f "$ignition_backup"
+        error "Failed to create skull backup"
+        rm -f "$skull_backup"
         return 1
     fi
     
@@ -847,11 +847,11 @@ _create_ignition_backup() {
 }
 
 _restore_master_key() {
-    local ignition_backup="$PADLOCK_KEYS/ignition.age"
+    local skull_backup="$PADLOCK_KEYS/skull.age"
     
     if [[ ! -f "$ignition_backup" ]]; then
-        error "No ignition backup found at: $ignition_backup"
-        info "The ignition backup is created automatically during initial setup."
+        error "No skull backup found at: $skull_backup"
+        info "The skull backup is created automatically during initial setup."
         return 1
     fi
     
@@ -865,19 +865,19 @@ _restore_master_key() {
         fi
     fi
     
-    info "🔥 Restoring master key from ignition backup..."
+    info "💀 Restoring master key from skull backup..."
     echo "Enter the passphrase used during setup:"
     
     local passphrase
     read -s -p "Passphrase: " passphrase
     echo
     
-    # Try to decrypt the ignition backup
+    # Try to decrypt the skull backup
     local temp_key
     temp_key=$(mktemp)
     trap "rm -f '$temp_key'" EXIT
     
-    if AGE_PASSPHRASE="$passphrase" age -d < "$ignition_backup" > "$temp_key" 2>/dev/null; then
+    if AGE_PASSPHRASE="$passphrase" age -d < "$skull_backup" > "$temp_key" 2>/dev/null; then
         # Verify it's a valid age key
         if age-keygen -y "$temp_key" >/dev/null 2>&1; then
             mkdir -p "$(dirname "$PADLOCK_GLOBAL_KEY")"
@@ -891,7 +891,7 @@ _restore_master_key() {
             return 1
         fi
     else
-        error "Failed to decrypt ignition backup"
+        error "Failed to decrypt skull backup"
         info "Please check your passphrase and try again."
         rm -f "$temp_key"
         return 1

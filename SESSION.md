@@ -1,7 +1,54 @@
 # Padlock Session Notes - 2025-08-27
 
-## Session Overview
+## Session Overview  
 Comprehensive review of padlock security system to identify and fix missing features, particularly the ignition API mentioned by the user.
+
+## Session 3: Key Hierarchy & API Implementation (Current)
+
+### Critical Discoveries
+1. **Ignition vs Skull Key Confusion**: Current "ignition" implementation is actually the skull key (X) backup system
+2. **Two Independent Systems Required**:
+   - Base System (M & R keys) - Working correctly
+   - Ignition Enhancement (I & D keys) - Not yet implemented
+3. **Age Limitations**: Age's `-p` flag requires interactive terminal, cannot use file/env vars for passphrases
+4. **BashFX Options Parsing**: Previous versions had argument parsing issues that need fixing for new API
+
+### Implementation Strategy Clarified
+1. **Key Mini-Dispatcher First**: Implement `padlock key` commands with proper BashFX options parsing
+2. **Skull Key Rename**: Change all "ignition backup" references to "skull key" for clarity
+3. **Stub Ignite API**: Create placeholder functions for complete ignite API surface
+4. **Defer Full Ignition**: Wait for clear spec before implementing I/D key hierarchy
+
+## Session 3 Continued: Command Refactoring
+
+### Additional Command Remapping Completed
+- **release**: Alias for declamp (clamp/release mental model)
+- **sec/dec**: Replace map/unmap with clearer names  
+- **sec auto**: Mini-dispatcher with auto subcommand (was autosec)
+- **master**: Full mini-dispatcher (generate/show/restore/unlock)
+- **rotate**: Enhanced with predicates (master/ignition/distro)  
+- **revoke**: Enhanced with predicates (ignition/distro)
+
+### Technical Notes for Future Implementation
+
+**🔗 Git Hook Refactor (Deferred)**
+- Current git hooks call lock/unlock directly
+- CONCEPTS.md specifies `_on_commit` and `_on_checkout` functions
+- Refactor needed: git hooks → _on_* functions → actual operations
+- **Priority**: Low - current system works, this is architectural cleanup
+
+**⚡ Predicate Pattern Success**  
+Mini-dispatchers enforce clear predicates:
+- `rotate master` (not just `rotate`)
+- `revoke ignition keyname` (not just `revoke`)
+- This eliminates dangerous ambiguity in destructive operations
+
+**📋 Downstream Updates Needed**
+Files requiring updates for new command mappings:
+- **test_runner.sh**: Update tests for new command names (sec/dec/release/master/etc.)
+- **README.md**: Update examples and documentation with new command syntax
+- **Help text**: Update main usage() function with new mini-dispatchers
+- **FEATURES.md**: Document new predicate pattern and command reorganization
 
 ## Key Findings
 
