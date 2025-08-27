@@ -136,6 +136,205 @@ Use `<cmd> help` for detailed APIs.
 
 - Report any tool problems immediately.
 
+## Plan X Pilot Methodology: Architectural Decision Framework
+
+### Overview: Autonomous Research Pilot System
+
+The **Plan X Ignition Key Pilot** established a replicable methodology for autonomous architectural decision-making in complex technical domains. This approach successfully evaluated 6 cryptographic approaches and delivered a data-driven production recommendation.
+
+### Core Methodology Components
+
+#### 1. Parallel Implementation Strategy
+**Pattern**: Implement multiple competing approaches simultaneously for direct comparison
+```bash
+# Create pilot environment with parallel implementations
+pilot.sh double_wrapped test    # Approach 1
+pilot.sh ssh_delegation test    # Approach 2  
+pilot.sh layered_native test    # Approach 3
+pilot.sh temporal_chain test    # Novel approach 1
+pilot.sh lattice_proxy test     # Novel approach 2
+```
+
+**Benefits**:
+- Direct performance comparison with identical testing conditions
+- Reveals implementation complexity differences early
+- Enables rapid iteration and debugging across approaches
+- Provides empirical data rather than theoretical estimates
+
+#### 2. Qualification Framework with Timeouts
+**Pattern**: Establish objective qualification criteria to eliminate problematic approaches
+```bash
+# 10-second timeout qualification requirement
+if ! timeout 10s approach_test; then
+    disqualify_approach "timeout exceeded"
+fi
+```
+
+**Qualification Criteria**:
+- **Performance**: Must complete operations within reasonable time bounds
+- **Functionality**: Must pass all test scenarios (create, unlock, validate)
+- **Automation**: Must support non-interactive operation
+- **Reliability**: Must handle error cases gracefully
+
+#### 3. Novel Approach Requirement
+**Pattern**: Force innovation beyond existing patterns by requiring original approaches
+- **Minimum**: 3 approaches total
+- **Innovation requirement**: At least 2 novel/original approaches
+- **Research integration**: Draw from current research and emerging concepts
+
+**Plan X Examples**:
+- `temporal_chain`: Blockchain-style key chains with forward secrecy
+- `lattice_proxy`: Post-quantum threshold M-of-N schemes
+
+#### 4. Empirical Performance Validation
+**Pattern**: Real timing data, not theoretical estimates
+```bash
+# Real performance measurement
+time ./pilot.sh layered_native test
+# Result: 0.240s (empirical)
+# NOT: "should be fast" (theoretical)
+```
+
+**Data Collection**:
+- Complete test cycle timing (not isolated operations)
+- Multiple runs for consistency validation  
+- Performance ranking with actual numbers
+- Trade-off analysis (performance vs security vs complexity)
+
+#### 5. Comprehensive Analysis Documentation
+**Pattern**: Force deep analysis through structured documentation
+- **PILOT.md**: Comprehensive analysis (150+ lines typical)
+- **Performance tables**: Real benchmark data
+- **Security analysis**: Threat model coverage across all approaches
+- **Implementation complexity**: Story point estimates for each approach
+- **Risk assessment**: Specific risks and mitigation strategies
+
+#### 6. Data-Driven Recommendation Framework
+**Pattern**: Objective decision criteria based on empirical evidence
+```bash
+# Example decision matrix:
+layered_native: 0.240s, 13 story points, strong security → WINNER
+temporal_chain: 0.259s, 32 story points, advanced security → Runner-up
+double_wrapped: 0.233s, 18 story points, compromised security → 3rd place
+```
+
+**Decision Factors**:
+1. **Performance** (empirical timing)
+2. **Security** (threat model coverage)
+3. **Implementation complexity** (story points)
+4. **Risk assessment** (production viability)
+5. **Automation support** (operational requirements)
+
+### Autonomous Completion Protocol
+
+#### Prerequisites for Autonomous Operation
+1. **Clear Objectives**: "Find the superior approach for production implementation"
+2. **Success Criteria**: All approaches implemented, tested, and ranked
+3. **Time Permission**: "Get as far as you can without consultation"
+4. **Documentation Requirements**: Comprehensive analysis and recommendation
+
+#### Execution Pattern
+```bash
+Phase 1: Implement all approaches (including novel ones)
+Phase 2: Fix blocking issues (timeouts, implementation bugs)
+Phase 3: Collect empirical performance data
+Phase 4: Comprehensive analysis and documentation  
+Phase 5: Data-driven recommendation with justification
+```
+
+#### Quality Gates
+- **Functionality**: All approaches must pass test scenarios
+- **Performance**: Real timing data for all qualified approaches
+- **Analysis**: Comprehensive documentation of trade-offs
+- **Recommendation**: Clear winner with empirical justification
+
+### Replication Guide for Future Pilots
+
+#### 1. Pilot Setup
+```bash
+# Create pilot script structure
+pilot.sh <approach> <command>
+- Multiple approach implementations
+- Common test scenarios
+- Timeout qualification
+- Performance measurement
+```
+
+#### 2. Approach Requirements
+- **Minimum 3 approaches** (sufficient for comparison)
+- **At least 2 novel approaches** (force innovation)
+- **All approaches address same problem** (fair comparison)
+- **Common interface for testing** (consistent evaluation)
+
+#### 3. Testing Protocol
+```bash
+# Standard test sequence for each approach:
+1. create-master [name] [passphrase]
+2. create-distro [name] [passphrase]  
+3. unlock [name] [correct-passphrase] → must succeed
+4. unlock [name] [wrong-passphrase] → must fail
+5. Performance timing of complete cycle
+```
+
+#### 4. Documentation Structure
+- **Executive Summary**: Winner and key findings
+- **Approach Descriptions**: Technical details for each
+- **Performance Analysis**: Real benchmark data in tables
+- **Security Analysis**: Threat model coverage comparison
+- **Implementation Complexity**: Story point estimates
+- **Risk Assessment**: Production readiness evaluation
+- **Final Recommendation**: Data-driven decision with justification
+
+#### 5. Success Metrics
+- **Completeness**: All approaches implemented and tested
+- **Empirical Data**: Real performance measurements
+- **Innovation**: Novel approaches working competitively
+- **Production Ready**: Clear recommendation with implementation roadmap
+
+### Lessons for Future Pilots
+
+#### What Works
+- **Parallel Implementation**: Enables direct comparison
+- **Timeout Qualification**: Eliminates problematic approaches early
+- **Empirical Measurement**: Provides defensible decision data
+- **Novel Requirement**: Forces creative solutions
+- **Comprehensive Documentation**: Enables informed decision-making
+
+#### What Doesn't Work  
+- **Theoretical Estimates**: Always wrong, use real measurements
+- **Single Approach Development**: No comparison basis
+- **Complex Automation**: Simple manual measurement often better
+- **Assumption-Based Decisions**: Empirical data always wins
+
+#### Key Anti-Patterns to Avoid
+- **Premature Optimization**: Get all approaches working first
+- **Documentation Drift**: Keep analysis in sync with implementation
+- **Complexity Bias**: Simple solutions often win
+- **Tool Fighting**: Work around limitations, don't fight them
+
+### Integration with Main Development Flow
+
+#### When to Use Pilot Methodology
+- **Architectural Decisions**: Multiple viable approaches exist
+- **Performance Critical**: Speed/efficiency is important
+- **Security Sensitive**: Multiple security models possible  
+- **Innovation Opportunity**: Novel approaches could provide advantages
+- **High Stakes**: Decision affects long-term project direction
+
+#### Integration Points
+- **Before Major Features**: Use pilots to validate approach before full implementation
+- **Technology Evaluation**: Compare libraries, patterns, or architectures
+- **Security Architecture**: Evaluate cryptographic or security approaches
+- **Performance Optimization**: Compare algorithmic or implementation strategies
+
+#### Resource Requirements
+- **Development Time**: 3-7 days typical for complex pilots
+- **Documentation**: 150+ lines comprehensive analysis
+- **Implementation**: Multiple working prototypes
+- **Testing**: Comprehensive validation of all approaches
+
+The Plan X pilot methodology provides a replicable framework for making complex architectural decisions with empirical data and autonomous completion. This approach transforms subjective architectural debates into objective, data-driven decisions that can be confidently implemented in production systems.
+
 ## Session 4 Insights: Advanced Development Patterns
 
 ### 1. AI-Optimized Help Systems Pattern 🔥
