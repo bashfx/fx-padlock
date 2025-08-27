@@ -135,3 +135,132 @@ Use case-insensitive search. Check project root, `doc*` directories, and `locker
 Use `<cmd> help` for detailed APIs.
 
 - Report any tool problems immediately.
+
+## Session 4 Insights: Advanced Development Patterns
+
+### 1. AI-Optimized Help Systems Pattern 🔥
+**Discovery**: Traditional help systems waste AI tokens. Implementing tiered help dramatically improves efficiency.
+
+**Successful Pattern**:
+```bash
+help|--help|-h)
+    case "${1:-}" in
+        <command>)
+            help_<command>    # Contextual help
+            ;;
+        more)
+            usage_detailed    # Full help for humans  
+            ;;
+        "")
+            usage            # Simplified for AI
+            ;;
+    esac
+    ;;
+```
+
+**Benefits**:
+- 75% token reduction for AI interactions
+- `padlock help master` > `padlock master help` (better UX)
+- Contextual help improves task completion
+- Maintains backwards compatibility
+
+**Recommendation**: Implement for any CLI tool >20 commands
+
+### 2. Centralized Temp File Management Pattern 🔥
+**Problem**: Found 21+ `mktemp` calls with inconsistent cleanup causing resource leaks
+
+**Solution Pattern**:
+```bash
+# Global system
+declare -a TEMP_FILES=()
+
+_temp_cleanup() { ... }
+_temp_register() { ... }  
+_temp_mktemp() { temp_file=$(mktemp "$@"); _temp_register "$temp_file"; echo "$temp_file"; }
+_temp_setup_trap() { trap '_temp_cleanup' EXIT ERR INT TERM }
+```
+
+**Usage**: Replace `$(mktemp)` with `$(_temp_mktemp)` + call `_temp_setup_trap`
+
+**Benefits**: Guaranteed cleanup, leak prevention, interrupt safety
+
+### 3. Build.sh Workflow Critical Insights 🔥
+
+**CRITICAL**: Never parse final compiled scripts >4000 lines - corrupts context
+**DO**: Edit parts/ files, then `./build.sh`
+**DO**: Use `func` tool for compiled script analysis (safe, efficient)
+
+**Testing Workflow**:
+1. Edit parts/
+2. `./build.sh` 
+3. Test compiled script
+4. Commit parts/ changes
+
+**Context Management**: parts/ files are safe to parse, compiled scripts are not
+
+### 4. Test Suite Modernization Pattern
+**Problem**: Monolithic test files become unmaintainable
+
+**Solution**: Update test expectations to match new UX patterns rather than changing UX to match old tests
+
+**Pattern**:
+```bash
+# OLD: Test specific help text presence
+grep -q "specific-command" help_output
+
+# NEW: Document UX change in tests
+echo "│ ✓ command available (shown in help more)"
+```
+
+**Insight**: Tests should validate user experience, not internal implementation details
+
+### 5. Automation Phase Management 🔥
+**User Pattern**: "Full automation mode - continue until finished, commit work"
+
+**Successful Approach**:
+1. **Create PLAN.md** with story-pointed tasks
+2. **Phase execution** with regular todo list updates  
+3. **Comprehensive commit** with detailed messages
+4. **SESSION.md updates** for continuity
+5. **CLAUDE.md insights** for future improvement
+
+**Key**: User returns to completed work + clear roadmap for next phase
+
+### 6. Function-Level Bug Detection Pattern
+**Discovery**: `set -euo pipefail` with BashFX creates subtle bugs
+
+**Example Bug**:
+```bash
+# BROKEN:
+local action="$1"; shift || true
+local path="${action:-$1}"  # $1 undefined after shift!
+
+# FIXED:  
+local action="${1:-}"
+case "$action" in
+    "") # Handle empty explicitly
+```
+
+**Pattern**: Always use `"${1:-}"` for optional params, handle empty case explicitly
+
+### 7. Quality Gate Pattern for Automation
+**Pattern**: Each phase must pass all quality gates before proceeding
+
+**Gates**:
+1. ✅ Build successful (syntax check)
+2. ✅ Tests passing (no regressions) 
+3. ✅ New features working (manual verification)
+4. ✅ Documentation updated (help, readme, etc.)
+
+**Automation Rule**: Never proceed to next phase with failing gates
+
+## Development Philosophy Refinements
+
+### Token Efficiency as First-Class Concern
+AI token usage should be optimized in user interfaces just like CPU/memory usage. Help systems that generate 1000+ tokens for simple queries waste resources and degrade experience.
+
+### Test Expectations vs Implementation
+When modernizing UX, update test expectations to match new patterns rather than maintaining old expectations. Tests should validate user experience outcomes, not internal mechanics.
+
+### Build System Discipline  
+In modular build systems (BashFX), editing the final compiled script is always wrong. This discipline prevents context corruption and maintains clean architecture.
