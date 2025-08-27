@@ -1,0 +1,5 @@
+TYPE=distro
+NAME=test-ai
+CREATED=2025-08-27T16:17:30+00:00
+AUTHORITY=ignition-master  
+KEY_DERIVATION=sha512-passphrase
