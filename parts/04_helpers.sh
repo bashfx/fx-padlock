@@ -2,6 +2,54 @@
 # Helper Functions - Mid and Low-Level
 ################################################################################
 
+# Temporary file cleanup system
+declare -a TEMP_FILES=()
+
+_temp_cleanup() {
+    local exit_code="${1:-$?}"
+    
+    if [[ ${#TEMP_FILES[@]} -gt 0 ]]; then
+        trace "Cleaning up ${#TEMP_FILES[@]} temporary files..."
+        for temp_file in "${TEMP_FILES[@]}"; do
+            if [[ -f "$temp_file" ]]; then
+                rm -f "$temp_file" 2>/dev/null || true
+                trace "Removed: $temp_file"
+            elif [[ -d "$temp_file" ]]; then
+                rm -rf "$temp_file" 2>/dev/null || true
+                trace "Removed: $temp_file/"
+            fi
+        done
+        TEMP_FILES=()
+    fi
+    
+    return "$exit_code"
+}
+
+_temp_register() {
+    local temp_path="$1"
+    TEMP_FILES+=("$temp_path")
+    trace "Registered temp file: $temp_path"
+}
+
+_temp_mktemp() {
+    local temp_file
+    temp_file=$(mktemp "$@")
+    _temp_register "$temp_file"
+    echo "$temp_file"
+}
+
+_temp_mktemp_d() {
+    local temp_dir
+    temp_dir=$(mktemp -d "$@")
+    _temp_register "$temp_dir"
+    echo "$temp_dir"
+}
+
+# Set up cleanup trap (should be called by functions that use temp files)
+_temp_setup_trap() {
+    trap '_temp_cleanup' EXIT ERR INT TERM
+}
+
 # Portable realpath --relative-to replacement
 _relative_path() {
     local target="$1"
@@ -381,7 +429,7 @@ __install_age_binary() {
     trace "Checksums: $checksum_url"
     
     # Create secure temporary directory
-    secure_temp=$(mktemp -d)
+    secure_temp=$(_temp_mktemp_d)
     trap "rm -rf '$secure_temp'" EXIT
     
     # Download binary and checksums
@@ -582,7 +630,7 @@ _lock_chest() {
     
     # Create temporary directory for staging
     local temp_chest
-    temp_chest=$(mktemp -d)
+    temp_chest=$(_temp_mktemp_d)
     trap 'rm -rf "$temp_chest"' RETURN
     
     # Copy all files to staging area
@@ -646,7 +694,7 @@ _unlock_chest() {
 
     # 1. Decrypt the ignition key into a temporary file.
     local temp_ignition_key
-    temp_ignition_key=$(mktemp)
+    temp_ignition_key=$(_temp_mktemp)
     trap "trace 'Cleaning up temp key file...'; rm -f -- '$temp_ignition_key'" RETURN
 
     AGE_PASSPHRASE="${PADLOCK_IGNITION_PASS}" age -d < "$encrypted_ignition_key_blob" > "$temp_ignition_key"
@@ -750,7 +798,7 @@ _rotate_ignition_key() {
 
     # Decrypt the key with the old passphrase
     local temp_ignition_key
-    temp_ignition_key=$(mktemp)
+    temp_ignition_key=$(_temp_mktemp)
     trap "rm -f -- '$temp_ignition_key'" RETURN
 
     AGE_PASSPHRASE="$old_passphrase" age -d < "$encrypted_ignition_key_blob" > "$temp_ignition_key"
@@ -874,7 +922,7 @@ _restore_master_key() {
     
     # Try to decrypt the skull backup
     local temp_key
-    temp_key=$(mktemp)
+    temp_key=$(_temp_mktemp)
     trap "rm -f '$temp_key'" EXIT
     
     if AGE_PASSPHRASE="$passphrase" age -d < "$skull_backup" > "$temp_key" 2>/dev/null; then

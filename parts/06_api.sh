@@ -389,7 +389,7 @@ do_lock() {
         
         # Update checksums in map file after processing
         local temp_map
-        temp_map=$(mktemp)
+        temp_map=$(_temp_mktemp)
         while IFS='|' read -r src_rel dest_rel old_checksum; do
             # Skip comments and empty lines
             if [[ "$src_rel" =~ ^[[:space:]]*# ]] || [[ -z "$src_rel" ]]; then
@@ -422,7 +422,7 @@ do_lock() {
     
     # Create archive and encrypt to a secure temporary file
     local temp_blob
-    temp_blob=$(mktemp "$(dirname "$PWD/locker.age")/locker.age.XXXXXX")
+    temp_blob=$(_temp_mktemp "$(dirname "$PWD/locker.age")/locker.age.XXXXXX")
     tar -czf - locker | __encrypt_stream > "$temp_blob"
 
     # Check if encryption was successful before proceeding
@@ -652,7 +652,7 @@ do_clean_manifest() {
     fi
 
     local temp_file
-    temp_file=$(mktemp)
+    temp_file=$(_temp_mktemp)
 
     # Preserve header
     grep "^#" "$manifest_file" > "$temp_file"
@@ -1585,7 +1585,7 @@ do_export() {
     info "📦 Exporting padlock environment..."
 
     local temp_dir
-    temp_dir=$(mktemp -d)
+    temp_dir=$(_temp_mktemp_d)
     trap 'rm -rf "$temp_dir"' RETURN
 
     local export_manifest="$temp_dir/manifest.txt"
@@ -1624,7 +1624,7 @@ _merge_manifests() {
     local import_manifest="$1"
     local current_manifest="$2"
     local temp_file
-    temp_file=$(mktemp)
+    temp_file=$(_temp_mktemp)
 
     # Preserve header from current manifest if it exists
     if [[ -f "$current_manifest" ]]; then
@@ -1671,7 +1671,7 @@ do_import() {
     fi
 
     local temp_dir
-    temp_dir=$(mktemp -d)
+    temp_dir=$(_temp_mktemp_d)
     trap 'rm -rf "$temp_dir"' RETURN
 
     # Decrypt and extract
@@ -1742,7 +1742,7 @@ do_snapshot() {
     info "Creating snapshot: $snapshot_name"
 
     local temp_dir
-    temp_dir=$(mktemp -d)
+    temp_dir=$(_temp_mktemp_d)
     trap 'rm -rf "$temp_dir"' RETURN
 
     cp "$PADLOCK_ETC/manifest.txt" "$temp_dir/manifest.txt"
@@ -2304,30 +2304,47 @@ do_master() {
 }
 
 do_sec() {
-    local action="$1"
-    shift || true
+    local action="${1:-}"
     
     case "$action" in
         auto)
             # padlock sec auto (was: automap)
+            shift || true
             do_automap "$@"
             ;;
             
-        add|"")
-            # padlock sec /path OR padlock sec add /path (default: add)
-            local path="${action:-$1}"
-            if [[ "$action" == "add" ]]; then
-                path="$1"
-                shift || true
-            fi
-            
+        add)
+            # padlock sec add /path
+            shift || true
+            local path="${1:-}"
             if [[ -z "$path" ]]; then
                 error "Missing file path"
-                info "Usage: padlock sec <path> OR padlock sec add <path>"
+                info "Usage: padlock sec add <path>"
                 return 1
             fi
             
-            do_map add "$path" "$@"
+            do_map add "$path" "${@:2}"
+            ;;
+            
+        "")
+            # padlock sec (no action) - show help
+            info "File Security Commands:"
+            info "  <path>              Secure file (default: add)"
+            info "  add <path>          Add file to security mapping"
+            info "  remove <path>       Remove file from security mapping"
+            info "  auto                Auto-secure sensitive files (*.md, build.sh, etc.)"
+            return 0
+            ;;
+            
+        *)
+            # padlock sec /path (treat first arg as path)
+            if [[ -z "$action" ]]; then
+                error "Missing file path"
+                info "Usage: padlock sec <path>"
+                return 1
+            fi
+            
+            do_map add "$action" "${@:2}"
             ;;
             
         remove)
@@ -3022,7 +3039,7 @@ EOF
             
             # Remove the mapping
             local temp_file
-            temp_file=$(mktemp)
+            temp_file=$(_temp_mktemp)
             grep -v "^$src_path|" "$map_file" > "$temp_file"
             mv "$temp_file" "$map_file"
             
@@ -3253,7 +3270,7 @@ do_unmap() {
         
         # Keep only comments and empty lines
         local temp_file
-        temp_file=$(mktemp)
+        temp_file=$(_temp_mktemp)
         grep "^#\|^[[:space:]]*$" "$map_file" > "$temp_file" || echo "# Padlock File Mapping" > "$temp_file"
         mv "$temp_file" "$map_file"
         
@@ -3295,7 +3312,7 @@ do_unmap() {
         local src_path="${entry%%|*}"
         
         local temp_file
-        temp_file=$(mktemp)
+        temp_file=$(_temp_mktemp)
         grep -v "^$src_path|" "$map_file" > "$temp_file"
         mv "$temp_file" "$map_file"
         
@@ -3328,7 +3345,7 @@ do_unmap() {
             local src_path="${selected_entry%%|*}"
             
             local temp_file
-            temp_file=$(mktemp)
+            temp_file=$(_temp_mktemp)
             grep -v "^$src_path|" "$map_file" > "$temp_file"
             mv "$temp_file" "$map_file"
             
