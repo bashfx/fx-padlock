@@ -341,28 +341,11 @@ do_lock() {
         return 1
     fi
     
-    # Validate encryption keys before proceeding
-    if [[ -n "${PADLOCK_KEY_FILE:-}" ]]; then
-        if [[ ! -f "$PADLOCK_KEY_FILE" ]]; then
-            error "❌ Repository key not found: $PADLOCK_KEY_FILE"
-            info "Cannot lock without encryption key"
-            return 1
-        fi
-    fi
-    
-    # Check if recipients include master key
-    if [[ -n "${AGE_RECIPIENTS:-}" ]]; then
-        # If using recipients, verify master key exists
-        if [[ ! -f "$PADLOCK_GLOBAL_KEY" ]]; then
-            warn "⚠️  Master key not found: $PADLOCK_GLOBAL_KEY"
-            info "Without master key, you won't be able to use master-unlock"
-            info "Continue anyway? (y/N)"
-            read -r confirm
-            if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
-                info "Lock cancelled for safety"
-                return 1
-            fi
-        fi
+    # Safety check: Verify we can unlock before allowing lock
+    if ! _verify_unlock_capability "$PWD"; then
+        error "❌ Safety check failed - aborting lock operation"
+        info "Fix the issues above before attempting to lock"
+        return 1
     fi
     
     lock "🔒 Encrypting locker directory..."
@@ -1242,24 +1225,51 @@ _chest_status() {
 }
 
 _ignition_unlock() {
-    if [[ -z "${PADLOCK_IGNITION_PASS:-}" ]]; then
-        error "Ignition key not found in environment variable PADLOCK_IGNITION_PASS."
+    local ignition_pass="${PADLOCK_IGNITION_PASS:-}"
+    
+    if [[ -z "$ignition_pass" ]]; then
+        error "Ignition passphrase not found in environment variable PADLOCK_IGNITION_PASS."
+        info "Usage: PADLOCK_IGNITION_PASS='your-phrase' padlock ignite --unlock"
         return 1
     fi
 
-    if [[ ! -f "locker.age" ]]; then
-        error "No encrypted locker found (locker.age missing)."
+    # Check for chest pattern
+    local encrypted_file
+    if [[ -f ".chest/locker.age" ]]; then
+        encrypted_file=".chest/locker.age"
+    elif [[ -f "locker.age" ]]; then
+        encrypted_file="locker.age"
+    else
+        error "No encrypted locker found."
         return 1
     fi
+    
+    # Verify we have the ignition key file
+    local ignition_key_file=".chest/ignition.key"
+    if [[ ! -f "$ignition_key_file" ]]; then
+        error "Ignition key file not found at $ignition_key_file"
+        info "Repository may not be in ignition mode"
+        return 1
+    fi
+    
+    # Verify the passphrase matches what was used during setup
+    if [[ -f ".chest/ignition.ref" ]]; then
+        local stored_ref=$(cat ".chest/ignition.ref")
+        local stored_pass="${stored_ref%%:*}"
+        if [[ "$ignition_pass" != "$stored_pass" ]]; then
+            error "Invalid ignition passphrase"
+            return 1
+        fi
+    fi
 
-    # Use the ignition pass as the age passphrase for decryption
-    export AGE_PASSPHRASE="$PADLOCK_IGNITION_PASS"
-
-    if __decrypt_stream < locker.age | tar -xzf -; then
-        rm -f locker.age .locked
+    # Use the ignition private key to decrypt (not passphrase mode)
+    if age -d -i "$ignition_key_file" < "$encrypted_file" | tar -xzf -; then
+        rm -f "$encrypted_file" .locked
+        [[ -d ".chest" ]] && rm -rf .chest
+        okay "✓ Repository unlocked with ignition key"
         return 0
     else
-        error "Failed to decrypt locker.age with ignition key."
+        error "Failed to decrypt with ignition key."
         return 1
     fi
 }

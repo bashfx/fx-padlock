@@ -1,41 +1,137 @@
+# CLAUDE.md - Project Context & Workflow
 
-## Important 
-padlock.sh is built via build.sh from ./parts
-do not read/edit it directly you must change the part files
+## Important Note
 
+### Key Insights from GitSim v2.1 Development
 
+**BashFX 2.1 Critical Patterns Discovered:**
 
-## Context 
+1. **Template Function Returns**: All template creation functions MUST end with explicit `return 0` 
+   - Issue: `trace` function returns exit code of test condition when `opt_trace=false`
+   - Solution: Always add `return 0` to template functions that end with trace/logging calls
 
+2. **Exit Code Propagation**: BashFX main pattern needs explicit exit handling
+   - Add `return $?` to main() function after dispatch call
+   - Add `exit $ret` after capturing main return code
+   - Critical for error detection in test suites and CI/CD
 
-## Tools 
-you have local commands available that you should use in your work and analysis
+3. **Argument Filtering Complexity**: Command-specific vs global flags require careful handling
+   - Global flags: `-d|--debug|-t|--trace|-q|--quiet|-y|--yes|-D|--dev|-h|--help`
+   - Command flags: `-m|--allow-empty|--template=*|--porcelain|--force`
+   - Syntax errors in one part can break subsequent parts (unclosed heredocs)
 
-## **Func Tool Mini Manual: `func` (Analysis & Manipulation)**
+4. **Heredoc Safety**: Always validate heredoc closure in template functions
+   - Use `grep -n "cat.*<<.*EOF" parts/*.sh` to find all heredocs
+   - Verify each has corresponding `EOF` closure
+   - Unclosed heredocs silently break script loading of later parts
 
-The `func` utility is your specialized, high-precision instrument for interacting with shell script source code. It is designed to be safer and more accurate than general-purpose parsing.
+5. **Logo UI Pattern**: Conditional logo display for scripting vs interactive use
+   - Skip logo for data-returning commands: `home-path`, `version`
+   - Show logo for user-facing commands: `init`, `template`, etc.
 
-### **4.1. Primary Use Cases & Priority**
+## General Development Patterns
 
-*   **Primary Analysis Tool (Highest Priority):** `func` is your **default and mandatory tool** for all shell function analysis. You MUST prioritize `func ls`, `func where`, and `func spy` over your own internal parsers for acquiring data points about shell functions.
-*   **FIIP Workflow Engine:** It is the engine that drives the **Function Isolation & Integration Protocol (FIIP)**. The `copy`, `flag`, and `insert` commands are the sanctioned methods for performing safe, iterative refactoring.
+### Validation-First Approach
+- **Always test functionality before optimization** - show that everything works, then optimize
+- **Modular validation**: Test each component independently before integration
+- **Document issues clearly**: Mark as blocking vs. non-blocking for release decisions
 
-### **4.2. API Reference (v4.0)**
+### BashFX Architecture Compliance
+- **BashFX 2.1 is the latest architecture** for building scalable bash scripts 500+ lines
+- **Build.sh pattern required**: Scripts 500-1000+ lines should use BashFX 2.1 Build.sh pattern
+- **Check before editing**: Always note if a project uses Build.sh pattern before modifying files
+- **Edit parts/, not final script**: In Build.sh projects, edit individual parts/, then rebuild
+- **Size limits matter**: 4000-line AI comprehension limit for complex scripts
+- **Modular build patterns**: Use build.map + parts/ structure for maintainability
+- **Avoid function duplication**: Check for multiple definitions that override each other
+- **Test build artifacts**: Always validate syntax and functionality after builds
+- **Ask for BashFX 2.1 docs** if architecture details are missing for bash work
 
-| Command | Arguments | Description & (Cost Level) |
-| :--- | :--- | :--- |
-| `ls` | `<src> [--bash]` | **(Level 1)** Lists all function names in a file. Your first step for codebase reconnaissance. |
-| `find` | `<pattern> <src> [--bash]` | **(Level 1)** Filters the function list by a pattern. Useful for finding related functions. |
-| `where` | `<func> <src> [--bash]` | **(Level 1)** Gets the starting line number of a function. Critical for existence checks. |
-| `spy` | `<func> <src>` | **(Level 2)** Extracts the full body of a single function. Your primary tool for targeted code analysis. |
-| `copy` | `<func> <src> [--alias <new>] [-f]`| Executes FIIP Phase 1: Creates the `./func/*.orig.sh` and `./func/*.edit.sh` workspace. |
-| `flag` | `<func> <new> <src>` | Executes FIIP Phase 3: Inserts the `# FUNC_INSERT` marker into the source code. |
-| `insert` | `<new_func> <src> [-y] [-f]`| Executes FIIP Phase 4: Inserts the verified function from the workspace into the source code. |
-| `check` | `<func_name>` | Verifies if the `.edit.sh` file has changes compared to its `.orig.sh` counterpart. |
-| `done` | `<func_name>` | Cleans up the workspace files for a specific function after the task is complete. |
-| `meta` | `<func_file.ext>` | **(Level 1)** Reads the `# FUNC_META` header from a file in the `./func/` directory. |```
+### Template/Boilerplate Strategy
+- **Minimize first, expand later**: Start with "hello world" functionality
+- **Preserve backups**: Keep parts-upd/ or similar for restoration when over-trimming
+- **Function dependencies**: When trimming, ensure all called functions exist
+- **Registration patterns**: Check execution order for dynamic registration systems
 
+### Debugging Multi-Part Systems
+- **Check execution order**: Later parts can override earlier definitions
+- **Trace missing functions**: grep for calls vs. definitions to find gaps
+- **Argument parsing issues**: BashFX pattern `args=("${orig_args[@]##-*}")` needs careful handling
+- **Dispatcher conflicts**: Multiple dispatch() functions will override each other
 
-- gitsim (can crate a virtual home and project folder for testing)
+### Session Management
+- **Progressive validation**: Phase 1 (build), Phase 2 (features), Phase 3 (core)
+- **Keep SESSION.md current**: Document findings, blocked items, continuation priorities
+- **Clean as you go**: Remove test artifacts between phases
+- **Size tracking**: Monitor script size growth, warn at thresholds
 
-use the help command to see more indepth apis.
+## Project Context Discovery
+
+You're likely continuing a previous session. Follow this sequence to understand the current state:
+
+### 1. Read Documentation (in priority order)
+
+Use case-insensitive search. Check project root, `doc*` directories, and `locker/docs_sec`:
+
+**a. Directives & Rules**
+- `IX*.md` (instructions/directives)  
+- `AGENTS.md` (standardized directives)
+
+**b. Tasks & Continuations**
+- `*TODO*.md` (pending tasks)
+- `*SESSION*.md` or `PLAN.md` (previous session notes)
+
+**c. Architecture**
+- `ARCH*.md`, `BASHFX*.md`
+- `*ref*\patterns`: standarized patterns or styles
+- `*ref*.md` : reference files for desired patterns, strategies, etc.
+- Internal architectures: BashFX (v2.1), REBEL/RSB (Rust DSL)
+
+**d. Project Concepts**
+- `*CONCEPT*.md`, `*PRD*.md`, `*BRIEF*.md`
+
+**e. Code & References**
+- `src/` (Rust), `parts/` (BashFX using the build.sh pattern)
+- Legacy/reference files (`.txt`, `*ref*` folders)
+
+### 2. Plan Execution
+
+1. **Analyze** key files to determine next tasks
+2. **Create/Update** `PLAN.md` with milestones and story points (≤1 point per subtask)
+3. **Share** high-level plan with user for approval
+
+### 3. Development Workflow
+
+**Branch Management**
+- Create new branch: `feature/name-date`, `refactor/name-date`, or `hotfix/name-date`
+- Use alternate name if branch exists
+
+**Task Execution**
+- Small tasks: iterate freely
+- Complex/critical changes: require verification
+- All code needs verifiable tests via `test_runner.sh` (for bash)
+- Tests must not regress previous functionality
+
+**Milestone Completion**
+- All work must have passing tests
+- User verifies success
+- Check in with semv prefix (`semv lbl` for options) no branding!
+- Manually bump versions in project files
+- Merge to main and push to origin
+
+**Session Contiuation & Completion**
+- Keep SESSION.md notes after each major effort/task/iteration 
+- Note any problems or potential solutions
+- Note the work youve done
+
+## Available Tools
+
+**`func`** - Shell script source code analysis
+- `func ls <src>` - list functions
+- `func spy <name> <src>` - extract specific function
+
+**`gitsim`** - Virtual git environment (don't use on gitsim project itself)
+
+Use `<cmd> help` for detailed APIs.
+
+- Report any tool problems immediately.

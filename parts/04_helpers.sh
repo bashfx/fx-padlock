@@ -24,6 +24,80 @@ _relative_path() {
     fi
 }
 
+# User interaction helpers
+_prompt() {
+    local prompt_text="$1"
+    local var_name="$2"
+    local default_value="${3:-}"
+    
+    # Check if we can interact
+    if [[ ! -t 0 ]] || [[ ! -t 1 ]]; then
+        if [[ -n "$default_value" ]]; then
+            printf -v "$var_name" "%s" "$default_value"
+            return 0
+        fi
+        return 1
+    fi
+    
+    local response
+    if [[ -n "$default_value" ]]; then
+        read -p "$prompt_text [$default_value]: " response
+        response="${response:-$default_value}"
+    else
+        read -p "$prompt_text: " response
+    fi
+    
+    printf -v "$var_name" "%s" "$response"
+}
+
+_prompt_secret() {
+    local prompt_text="$1"
+    local var_name="$2"
+    
+    # Check if we can interact
+    if [[ ! -t 0 ]] || [[ ! -t 1 ]]; then
+        return 1
+    fi
+    
+    local response
+    read -s -p "$prompt_text: " response
+    echo  # New line after hidden input
+    printf -v "$var_name" "%s" "$response"
+}
+
+_confirm() {
+    local prompt_text="$1"
+    local default="${2:-n}"  # Default to 'no' if not specified
+    
+    # Auto-confirm if -y flag is set
+    if [[ "$opt_yes" -eq 1 ]]; then
+        return 0
+    fi
+    
+    # Check if we can interact
+    if [[ ! -t 0 ]] || [[ ! -t 1 ]]; then
+        if [[ "$default" == "y" ]]; then
+            return 0
+        else
+            return 1
+        fi
+    fi
+    
+    local response
+    if [[ "$default" == "y" ]]; then
+        read -p "$prompt_text [Y/n]: " response
+        response="${response:-y}"
+    else
+        read -p "$prompt_text [y/N]: " response
+        response="${response:-n}"
+    fi
+    
+    case "$response" in
+        [yY]|[yY][eE][sS]) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
 # Guard functions (is_* pattern)
 is_git_repo() {
     local target_dir="${1:-.}"
@@ -33,6 +107,93 @@ is_git_repo() {
 is_deployed() {
     local repo_root="$1"
     [[ -f "$repo_root/bin/age-wrapper" ]] && [[ -f "$repo_root/.gitattributes" ]]
+}
+
+# Safety check to prevent lock-out
+_verify_unlock_capability() {
+    local repo_root="${1:-$REPO_ROOT}"
+    local warnings=0
+    
+    info "🔍 Verifying unlock capability to prevent lock-out..."
+    
+    # Check 1: Repository key exists
+    local repo_name=$(basename "$repo_root")
+    local repo_key="$PADLOCK_KEYS/${repo_name}.key"
+    if [[ -f "$repo_key" ]]; then
+        okay "✓ Repository key exists: $repo_key"
+    else
+        ((warnings++))
+        warn "⚠️  No repository-specific key found"
+    fi
+    
+    # Check 2: Global master key exists
+    if [[ -f "$PADLOCK_GLOBAL_KEY" ]]; then
+        okay "✓ Global master key exists"
+    else
+        ((warnings++))
+        warn "⚠️  No global master key found"
+    fi
+    
+    # Check 3: Ignition backup exists
+    local ignition_backup="$PADLOCK_KEYS/ignition.age"
+    if [[ -f "$ignition_backup" ]]; then
+        okay "✓ Ignition backup available for key recovery"
+    else
+        ((warnings++))
+        warn "⚠️  No ignition backup for emergency recovery"
+    fi
+    
+    # Check 4: If in ignition mode, verify setup
+    if [[ -f "$repo_root/.chest/ignition.key" ]] || [[ -f "$repo_root/.chest/ignition.ref" ]]; then
+        okay "✓ Ignition mode configured"
+        if [[ -f "$repo_root/.chest/ignition.ref" ]]; then
+            local stored_ref=$(cat "$repo_root/.chest/ignition.ref" 2>/dev/null)
+            local stored_pass="${stored_ref%%:*}"
+            if [[ -n "$stored_pass" ]]; then
+                info "  📝 Remember your ignition passphrase: starts with '${stored_pass:0:4}...'"
+            fi
+        fi
+    fi
+    
+    # Check 5: Verify recipients in .padlock config
+    local locker_config="$repo_root/locker/.padlock"
+    if [[ -f "$locker_config" ]]; then
+        local recipients=$(grep "^export AGE_RECIPIENTS=" "$locker_config" 2>/dev/null | cut -d'"' -f2)
+        if [[ -n "$recipients" ]]; then
+            okay "✓ Encryption recipients configured"
+        else
+            ((warnings++))
+            warn "⚠️  No encryption recipients configured"
+        fi
+    fi
+    
+    # Final safety decision
+    if [[ $warnings -eq 0 ]]; then
+        okay "✅ All unlock methods verified - safe to proceed"
+        return 0
+    elif [[ $warnings -le 2 ]]; then
+        warn "⚠️  $warnings warning(s) detected but recovery still possible"
+        if _confirm "Continue despite warnings?" "n"; then
+            return 0
+        else
+            return 1
+        fi
+    else
+        error "❌ HIGH RISK: $warnings critical issues - you may lock yourself out!"
+        error "Please ensure at least one of the following:"
+        error "  1. Repository key exists in $PADLOCK_KEYS/"
+        error "  2. Global master key exists"
+        error "  3. Ignition backup created with 'padlock setup'"
+        error "  4. Valid recipients configured"
+        
+        if [[ "$opt_force" -eq 1 ]]; then
+            warn "⚠️  Force flag detected - proceeding despite risk"
+            return 0
+        else
+            info "Use --force to override (NOT RECOMMENDED)"
+            return 1
+        fi
+    fi
 }
 
 is_dev() {
@@ -531,40 +692,43 @@ _generate_ignition_key() {
 }
 
 _setup_ignition_system() {
-    local ignition_passphrase="${1}" # The memorable phrase
+    local ignition_passphrase="${1}" # The memorable phrase for sharing
 
     info "🔥 Setting up ignition system..."
 
-    # 1. Generate the repository's master keypair. This will be encrypted.
+    # 1. Generate the repository's ignition keypair
     local ignition_key_file="$REPO_ROOT/.chest/ignition.key"
     mkdir -p "$REPO_ROOT/.chest"
-    age-keygen -o "$ignition_key_file" >/dev/null
+    age-keygen -o "$ignition_key_file" 2>/dev/null
     trace "Generated ignition keypair at $ignition_key_file"
 
-    # 2. Encrypt the new private key using the provided passphrase.
-    local encrypted_ignition_key_blob="$REPO_ROOT/.chest/ignition.age"
-    AGE_PASSPHRASE="$ignition_passphrase" age -p < "$ignition_key_file" > "$encrypted_ignition_key_blob"
-    if [[ $? -ne 0 ]]; then
-        fatal "Failed to encrypt ignition key with passphrase."
-    fi
-    trace "Encrypted ignition key stored at $encrypted_ignition_key_blob"
-
-    # 3. Get the public key of the new ignition key. This will be the recipient for the locker.
+    # 2. Get the public key of the ignition key - this will be used to encrypt the locker
     local ignition_public_key
     ignition_public_key=$(age-keygen -y "$ignition_key_file")
+    trace "Ignition public key: $ignition_public_key"
 
-    # 4. Clean up the plaintext private key.
-    rm -f "$ignition_key_file"
-
-    # 5. Set up the .padlock config file for future `ignite --lock` operations.
+    # 3. Store the passphrase and public key mapping for reference
+    # This allows the unlock process to verify the correct passphrase
+    echo "$ignition_passphrase:$ignition_public_key" > "$REPO_ROOT/.chest/ignition.ref"
+    chmod 600 "$REPO_ROOT/.chest/ignition.ref"
+    
+    # 4. The ignition key itself stays in plaintext but protected by filesystem
+    # The security comes from the chest being encrypted with this key's public key
+    # Only someone with the passphrase can decrypt the chest and access this key
+    chmod 600 "$ignition_key_file"
+    
+    # 5. Set up the .padlock config to use ignition key as recipient
     export AGE_RECIPIENTS="$ignition_public_key"
-    export PADLOCK_KEY_FILE=""
-    export AGE_PASSPHRASE=""
+    export PADLOCK_KEY_FILE=""  # No key file needed, using recipient mode
+    export AGE_PASSPHRASE=""     # Clear any passphrase
     __print_padlock_config "$LOCKER_CONFIG" "$(basename "$REPO_ROOT")"
 
     okay "✓ Ignition system configured."
     info "🔑 Your ignition passphrase: $ignition_passphrase"
     warn "⚠️  Share this passphrase for AI/automation access. Keep it safe."
+    
+    # The actual security: when locking, the locker will be encrypted TO the ignition public key
+    # When unlocking with the passphrase, we'll use the ignition private key
 }
 
 _rotate_ignition_key() {

@@ -1,0 +1,34 @@
+# I usually do something like this
+
+  options(){
+    local this next opts=("${@}");
+    for ((i=0; i<${#opts[@]}; i++)); do
+      this=${opts[i]}
+      next=${opts[i+1]}
+      case "$this" in
+        --debug|-d)
+          opt_debug=0
+          opt_quiet=1
+          ;;
+					# ... others
+        *)    
+          :
+          ;;
+      esac
+    done
+  }
+
+
+# then before main is called I have
+
+
+  if [ "$0" = "-bash" ]; then
+    :
+  else
+		# direct call
+    orig_args=("${@}")
+    options "${orig_args[@]}";
+    args=( "${orig_args[@]/^-*}" ); #delete anything that looks like an option
+    main "${args[@]}";ret=$?
+  fi
+

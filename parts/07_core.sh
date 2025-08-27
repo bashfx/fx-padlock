@@ -21,9 +21,6 @@ dispatch() {
         key)
             do_key "$@"
             ;;
-        setup)
-            do_setup "$@"
-            ;;
         install)
             do_install "$@"
             ;;
