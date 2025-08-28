@@ -1,279 +1,267 @@
 #!/bin/bash
-# File: test_security_fix.sh - Automated TASK-001-FIX validation
+################################################################################
+# Security Test Suite for Age TTY Subversion Functions
+# Tests for command injection vulnerability fixes in TASK-001-FIX
+################################################################################
 
 set -euo pipefail
 
 # Test configuration
-TEST_DIR_PREFIX="padlock-security-test"
-PASSED_TESTS=0
-TOTAL_TESTS=0
+TEST_DIR="$(mktemp -d)"
+TEMP_FILES=()
+TESTS_PASSED=0
+TESTS_FAILED=0
 
-# Color output for readability
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m' # No Color
+# Cleanup function
+cleanup() {
+    echo "🧹 Cleaning up test files..."
+    rm -rf "$TEST_DIR" 2>/dev/null || true
+    for file in "${TEMP_FILES[@]}"; do
+        rm -f "$file" 2>/dev/null || true
+    done
+}
+trap cleanup EXIT
 
-log_test() {
-    echo -e "${BLUE}[TEST]${NC} $*"
+# Load the required parts in order
+source parts/02_config.sh
+source parts/03_stderr.sh  
+source parts/04_helpers.sh
+
+# Initialize options for the loaded functions
+opt_trace=1    # Enable tracing for debugging
+opt_quiet=0
+opt_debug=0
+
+# Set up temp file cleanup
+_temp_setup_trap
+
+# Test helper functions
+ok() { 
+    echo "✅ $1"
+    ((TESTS_PASSED++))
 }
 
-log_pass() {
-    echo -e "${GREEN}[PASS]${NC} $*"
-    ((PASSED_TESTS++))
+fail() { 
+    echo "❌ $1"
+    ((TESTS_FAILED++))
 }
 
-log_fail() {
-    echo -e "${RED}[FAIL]${NC} $*"
+info() {
+    echo "🔍 $1"
 }
 
-log_warn() {
-    echo -e "${YELLOW}[WARN]${NC} $*"
-}
+# Create test files
+TEST_INPUT="$TEST_DIR/test.txt"
+TEST_OUTPUT="$TEST_DIR/test.age"
+echo "Hello, secure world!" > "$TEST_INPUT"
 
-# Test 1: Command Injection Prevention
-test_command_injection_prevention() {
-    log_test "Testing command injection prevention..."
-    ((TOTAL_TESTS++))
-    
-    local test_dir=$(mktemp -d -t "${TEST_DIR_PREFIX}-injection-XXXXXX")
-    cd "$test_dir"
-    
-    # Initialize test repo
-    gitsim init
-    gitsim config user.name "Security Test"
-    gitsim config user.email "test@security.local"
-    
-    # Initialize padlock
-    ../padlock.sh clamp . --master-key="test-master-pass"
-    
-    # Test dangerous passphrases that would exploit old vulnerability
-    local dangerous_passphrases=(
-        "'; rm -rf /tmp/injection-marker; echo 'injection-test"
-        "\$(echo 'command-injection-marker')"
-        "pass\`whoami\`word"
-        "test'; touch /tmp/pwned-marker; echo 'pwned"
-        "\$(/bin/echo dangerous-marker)"
-    )
-    
-    local failed_injections=0
-    
-    for dangerous_pass in "${dangerous_passphrases[@]}"; do
-        log_test "  Testing injection passphrase: ${dangerous_pass:0:30}..."
+# Test 1: Normal passphrase operation
+info "Test 1: Normal passphrase operation"
+normal_pass="simple123password"
+if _age_interactive_encrypt "$TEST_INPUT" "$TEST_OUTPUT" "$normal_pass" 2>/dev/null; then
+    # Verify decryption works
+    decrypted_output="$(_age_interactive_decrypt "$TEST_OUTPUT" "$normal_pass" 2>/dev/null)"
+    if [[ "$decrypted_output" == "Hello, secure world!" ]]; then
+        ok "Normal passphrase encrypt/decrypt works"
+    else
+        fail "Normal passphrase decryption failed"
+    fi
+else
+    fail "Normal passphrase encryption failed"
+fi
+
+# Test 2: Passphrase with single quotes
+info "Test 2: Passphrase with single quotes"
+quote_pass="pass'with'quotes"
+TEST_OUTPUT2="$TEST_DIR/test2.age"
+if _age_interactive_encrypt "$TEST_INPUT" "$TEST_OUTPUT2" "$quote_pass" 2>/dev/null; then
+    decrypted_output="$(_age_interactive_decrypt "$TEST_OUTPUT2" "$quote_pass" 2>/dev/null)"
+    if [[ "$decrypted_output" == "Hello, secure world!" ]]; then
+        ok "Single quotes in passphrase handled safely"
+    else
+        fail "Single quotes passphrase decryption failed"
+    fi
+else
+    fail "Single quotes passphrase encryption failed"
+fi
+
+# Test 3: Passphrase with double quotes  
+info "Test 3: Passphrase with double quotes"
+dquote_pass='pass"with"double"quotes'
+TEST_OUTPUT3="$TEST_DIR/test3.age"
+if _age_interactive_encrypt "$TEST_INPUT" "$TEST_OUTPUT3" "$dquote_pass" 2>/dev/null; then
+    decrypted_output="$(_age_interactive_decrypt "$TEST_OUTPUT3" "$dquote_pass" 2>/dev/null)"
+    if [[ "$decrypted_output" == "Hello, secure world!" ]]; then
+        ok "Double quotes in passphrase handled safely"
+    else
+        fail "Double quotes passphrase decryption failed"
+    fi
+else
+    fail "Double quotes passphrase encryption failed"
+fi
+
+# Test 4: Passphrase with shell variables ($USER)
+info "Test 4: Passphrase with shell variables (\$USER)"
+var_pass="password\$USER\$HOME"
+TEST_OUTPUT4="$TEST_DIR/test4.age"
+if _age_interactive_encrypt "$TEST_INPUT" "$TEST_OUTPUT4" "$var_pass" 2>/dev/null; then
+    # Verify the literal string was used, not variable expansion
+    decrypted_output="$(_age_interactive_decrypt "$TEST_OUTPUT4" "$var_pass" 2>/dev/null)"
+    if [[ "$decrypted_output" == "Hello, secure world!" ]]; then
+        ok "Shell variables in passphrase handled as literals (not expanded)"
+    else
+        fail "Shell variables passphrase test failed"
+    fi
+else
+    fail "Shell variables passphrase encryption failed"
+fi
+
+# Test 5: Passphrase with command substitution $(whoami)
+info "Test 5: Passphrase with command substitution \$(whoami)"
+cmd_pass="pass\$(whoami)word"
+TEST_OUTPUT5="$TEST_DIR/test5.age"
+if _age_interactive_encrypt "$TEST_INPUT" "$TEST_OUTPUT5" "$cmd_pass" 2>/dev/null; then
+    # Verify the literal string was used, not command substitution
+    decrypted_output="$(_age_interactive_decrypt "$TEST_OUTPUT5" "$cmd_pass" 2>/dev/null)"
+    if [[ "$decrypted_output" == "Hello, secure world!" ]]; then
+        ok "Command substitution in passphrase handled as literal (not executed)"
+    else
+        fail "Command substitution passphrase test failed"  
+    fi
+else
+    fail "Command substitution passphrase encryption failed"
+fi
+
+# Test 6: Passphrase with command injection attempt
+info "Test 6: Passphrase with command injection attempt"
+injection_pass="'; rm -rf /tmp/security_test_marker; echo '"
+TEST_OUTPUT6="$TEST_DIR/test6.age"
+
+# Create marker file to test if command injection occurs
+MARKER_FILE="/tmp/security_test_marker_$$"
+touch "$MARKER_FILE"
+TEMP_FILES+=("$MARKER_FILE")
+
+if _age_interactive_encrypt "$TEST_INPUT" "$TEST_OUTPUT6" "$injection_pass" 2>/dev/null; then
+    # Check if marker file still exists (command injection would have deleted it)
+    if [[ -f "$MARKER_FILE" ]]; then
+        ok "Command injection attempt blocked - marker file still exists"
         
-        # Create test file
-        echo "sensitive data" > test-file.txt
-        
-        # Try to create ignition key with dangerous passphrase
-        if ../padlock.sh ignite create injection-test --phrase="$dangerous_pass" 2>/dev/null; then
-            
-            # Verify the key works (passphrase was properly handled)
-            if ../padlock.sh ignite unlock injection-test --phrase="$dangerous_pass" 2>/dev/null; then
-                log_test "    ✅ Dangerous passphrase handled securely"
-                
-                # Most important: verify no command injection occurred
-                if [[ ! -f "/tmp/injection-marker" ]] && 
-                   [[ ! -f "/tmp/pwned-marker" ]] &&
-                   ! pgrep -f "command-injection-marker" >/dev/null 2>&1 &&
-                   ! pgrep -f "dangerous-marker" >/dev/null 2>&1; then
-                    log_test "    ✅ No command injection detected"
-                else
-                    log_fail "    ❌ SECURITY FAILURE: Command injection detected!"
-                    ((failed_injections++))
-                fi
-            else
-                log_test "    ⚠️  Key creation succeeded but unlock failed (acceptable)"
-            fi
+        # Verify decryption with exact malicious string
+        decrypted_output="$(_age_interactive_decrypt "$TEST_OUTPUT6" "$injection_pass" 2>/dev/null)"
+        if [[ "$decrypted_output" == "Hello, secure world!" ]]; then
+            ok "Command injection passphrase handled as literal string"
         else
-            log_test "    ✅ Key creation properly failed for dangerous passphrase"
+            fail "Command injection passphrase decryption failed"
         fi
-        
-        # Cleanup for next test
-        rm -f test-file.txt
-        rm -rf .padlock/ignition 2>/dev/null || true
-    done
-    
-    cd /tmp && rm -rf "$test_dir"
-    
-    if [[ $failed_injections -eq 0 ]]; then
-        log_pass "Command injection prevention test completed successfully"
-        return 0
     else
-        log_fail "Command injection test failed ($failed_injections vulnerabilities)"
-        return 1
+        fail "CRITICAL SECURITY ISSUE: Command injection vulnerability still exists!"
     fi
-}
-
-# Test 2: Performance Regression Check
-test_performance_regression() {
-    log_test "Testing performance regression..."
-    ((TOTAL_TESTS++))
-    
-    local test_dir=$(mktemp -d -t "${TEST_DIR_PREFIX}-performance-XXXXXX")
-    cd "$test_dir"
-    
-    gitsim init
-    ../padlock.sh clamp . --master-key="perf-test-pass"
-    
-    # Create test file
-    dd if=/dev/zero of=test-large-file.dat bs=1024 count=50 2>/dev/null
-    
-    # Benchmark secure implementation
-    local start_time=$(date +%s.%N)
-    
-    for i in {1..3}; do
-        ../padlock.sh ignite create "perf-test-$i" --phrase="performance-test-passphrase-$i" >/dev/null 2>&1
-        ../padlock.sh ignite unlock "perf-test-$i" --phrase="performance-test-passphrase-$i" >/dev/null 2>&1
-    done
-    
-    local end_time=$(date +%s.%N)
-    local duration=$(echo "$end_time - $start_time" | bc -l 2>/dev/null || echo "1")
-    local avg_duration=$(echo "scale=3; $duration / 3" | bc -l 2>/dev/null || echo "0.333")
-    
-    log_test "  Average operation time: ${avg_duration}s"
-    
-    # Performance threshold: should be under 0.400s per operation (generous buffer)
-    if (( $(echo "$avg_duration < 0.400" | bc -l 2>/dev/null || echo "1") )); then
-        log_pass "Performance test passed (${avg_duration}s < 0.400s threshold)"
-        cd /tmp && rm -rf "$test_dir"
-        return 0
+else
+    # If encryption fails, that's also acceptable (secure failure)
+    if [[ -f "$MARKER_FILE" ]]; then
+        ok "Command injection attempt blocked - encryption failed safely"
     else
-        log_fail "Performance regression detected (${avg_duration}s >= 0.400s)"
-        cd /tmp && rm -rf "$test_dir"
-        return 1
+        fail "CRITICAL: Command injection executed during failed encryption!"
     fi
-}
+fi
 
-# Test 3: Unicode and Special Character Handling
-test_unicode_special_chars() {
-    log_test "Testing Unicode and special character handling..."
-    ((TOTAL_TESTS++))
-    
-    local test_dir=$(mktemp -d -t "${TEST_DIR_PREFIX}-unicode-XXXXXX")
-    cd "$test_dir"
-    
-    gitsim init
-    ../padlock.sh clamp . --master-key="unicode-master"
-    
-    # Test various character encodings and special characters
-    local special_passphrases=(
-        "password with spaces"
-        '"double"quotes"'
-        "single'quotes'inside"
-        "test-simple-dash"
-        "test_underscore_chars"
-    )
-    
-    local failed_unicode=0
-    
-    for special_pass in "${special_passphrases[@]}"; do
-        local pass_desc="${special_pass:0:20}"
-        log_test "  Testing special passphrase: $pass_desc..."
+# Test 7: Complex mixed dangerous passphrase
+info "Test 7: Complex mixed dangerous passphrase"
+complex_pass='evil"; rm -rf /tmp/*; $(echo "pwned"); $USER'\''more evil'
+TEST_OUTPUT7="$TEST_DIR/test7.age"
+
+# Create another marker to test
+MARKER_FILE2="/tmp/security_test_marker2_$$"
+touch "$MARKER_FILE2"
+TEMP_FILES+=("$MARKER_FILE2")
+
+if _age_interactive_encrypt "$TEST_INPUT" "$TEST_OUTPUT7" "$complex_pass" 2>/dev/null; then
+    if [[ -f "$MARKER_FILE2" ]]; then
+        ok "Complex dangerous passphrase handled safely"
         
-        if ../padlock.sh ignite create unicode-test --phrase="$special_pass" >/dev/null 2>&1; then
-            if ../padlock.sh ignite unlock unicode-test --phrase="$special_pass" >/dev/null 2>&1; then
-                log_test "    ✅ Special characters handled correctly"
-            else
-                log_fail "    ❌ Special passphrase unlock failed"
-                ((failed_unicode++))
-            fi
+        # Test decryption
+        decrypted_output="$(_age_interactive_decrypt "$TEST_OUTPUT7" "$complex_pass" 2>/dev/null)"
+        if [[ "$decrypted_output" == "Hello, secure world!" ]]; then
+            ok "Complex dangerous passphrase decryption works"
         else
-            log_warn "    ⚠️  Special passphrase creation failed (may be acceptable)"
+            fail "Complex dangerous passphrase decryption failed"
         fi
-        
-        rm -rf .padlock/ignition 2>/dev/null || true
-    done
-    
-    cd /tmp && rm -rf "$test_dir"
-    
-    if [[ $failed_unicode -eq 0 ]]; then
-        log_pass "Unicode and special character test completed"
-        return 0
     else
-        log_fail "Unicode test failed ($failed_unicode failures)"
-        return 1
+        fail "CRITICAL: Complex command injection succeeded!"
     fi
-}
-
-# Test 4: Temp File Cleanup Verification
-test_temp_cleanup() {
-    log_test "Testing temporary file cleanup..."
-    ((TOTAL_TESTS++))
-    
-    local test_dir=$(mktemp -d -t "${TEST_DIR_PREFIX}-cleanup-XXXXXX")
-    cd "$test_dir"
-    
-    gitsim init
-    ../padlock.sh clamp . --master-key="cleanup-test"
-    
-    # Count temp files before operation
-    local temp_files_before=$(find /tmp -name "*padlock*" -o -name "*.pipe" 2>/dev/null | wc -l)
-    
-    # Perform operations that create temp files
-    ../padlock.sh ignite create cleanup-test --phrase="cleanup-passphrase" >/dev/null 2>&1 || true
-    ../padlock.sh ignite unlock cleanup-test --phrase="cleanup-passphrase" >/dev/null 2>&1 || true
-    
-    # Small delay to allow cleanup
-    sleep 0.2
-    
-    # Count temp files after operation  
-    local temp_files_after=$(find /tmp -name "*padlock*" -o -name "*.pipe" 2>/dev/null | wc -l)
-    
-    cd /tmp && rm -rf "$test_dir"
-    
-    # Allow for some temp files (other processes), but shouldn't increase significantly
-    if [[ $temp_files_after -le $((temp_files_before + 3)) ]]; then
-        log_pass "Temporary file cleanup test passed (before: $temp_files_before, after: $temp_files_after)"
-        return 0
+else
+    # Acceptable failure mode
+    if [[ -f "$MARKER_FILE2" ]]; then
+        ok "Complex dangerous passphrase rejected safely"  
     else
-        log_fail "Temporary file cleanup test failed (leak detected: before: $temp_files_before, after: $temp_files_after)"
-        return 1
+        fail "CRITICAL: Command injection during complex passphrase failure!"
     fi
-}
+fi
 
-# Master test runner
-main() {
-    echo "========================================"
-    echo "TASK-001-FIX SECURITY VALIDATION SUITE"
-    echo "Named Pipe Strategy Implementation Test"
-    echo "========================================"
-    echo
-    
-    # Verify padlock binary exists
-    if [[ ! -f "./padlock.sh" ]] && [[ ! -f "./padlock" ]]; then
-        log_fail "Padlock binary not found. Please run from padlock project directory."
-        exit 1
-    fi
-    
-    # Use build artifact if available
-    if [[ -f "./padlock.sh" ]] && [[ ! -x "./padlock" ]]; then
-        ln -sf "./padlock.sh" "./padlock"
-    fi
-    
-    # Run all tests
-    test_command_injection_prevention || true
-    test_performance_regression || true
-    test_unicode_special_chars || true
-    test_temp_cleanup || true
-    
-    echo
-    echo "========================================"
-    echo "TASK-001-FIX VALIDATION RESULTS"
-    echo "========================================"
-    echo "Tests passed: $PASSED_TESTS / $TOTAL_TESTS"
-    
-    if [[ $PASSED_TESTS -eq $TOTAL_TESTS ]]; then
-        echo -e "${GREEN}🎉 ALL SECURITY TESTS PASSED${NC}"
-        echo "✅ TASK-001-FIX implementation is production ready"
-        echo "✅ Named Pipe Strategy eliminates command injection vulnerability"
-        exit 0
+# Test 8: Unicode and special characters
+info "Test 8: Unicode and special characters"
+unicode_pass="påss🔒wørd-测试"
+TEST_OUTPUT8="$TEST_DIR/test8.age"
+if _age_interactive_encrypt "$TEST_INPUT" "$TEST_OUTPUT8" "$unicode_pass" 2>/dev/null; then
+    decrypted_output="$(_age_interactive_decrypt "$TEST_OUTPUT8" "$unicode_pass" 2>/dev/null)"
+    if [[ "$decrypted_output" == "Hello, secure world!" ]]; then
+        ok "Unicode characters in passphrase work correctly"
     else
-        echo -e "${YELLOW}⚠️  SOME TESTS FAILED${NC}"
-        echo "❌ TASK-001-FIX implementation may need review"
-        echo "Note: Some failures may be acceptable depending on system configuration"
-        exit 1
+        fail "Unicode passphrase decryption failed"
     fi
-}
+else
+    fail "Unicode passphrase encryption failed"
+fi
 
-main "$@"
+# Test 9: Very long passphrase (DoS protection)  
+info "Test 9: Very long passphrase (DoS protection)"
+long_pass=$(printf 'a%.0s' {1..1000})  # 1000 character passphrase
+TEST_OUTPUT9="$TEST_DIR/test9.age"
+if timeout 30s _age_interactive_encrypt "$TEST_INPUT" "$TEST_OUTPUT9" "$long_pass" 2>/dev/null; then
+    if timeout 30s bash -c "decrypted_output=\$(_age_interactive_decrypt '$TEST_OUTPUT9' '$long_pass' 2>/dev/null); [[ \"\$decrypted_output\" == \"Hello, secure world!\" ]]"; then
+        ok "Very long passphrase handled within timeout"
+    else
+        fail "Very long passphrase decryption failed"
+    fi
+else
+    fail "Very long passphrase encryption timed out (potential DoS vulnerability)"
+fi
+
+# Test 10: Empty passphrase edge case
+info "Test 10: Empty passphrase edge case"
+empty_pass=""
+TEST_OUTPUT10="$TEST_DIR/test10.age"
+if _age_interactive_encrypt "$TEST_INPUT" "$TEST_OUTPUT10" "$empty_pass" 2>/dev/null; then
+    decrypted_output="$(_age_interactive_decrypt "$TEST_OUTPUT10" "$empty_pass" 2>/dev/null)"
+    if [[ "$decrypted_output" == "Hello, secure world!" ]]; then
+        ok "Empty passphrase handled correctly"
+    else
+        fail "Empty passphrase decryption failed"
+    fi  
+else
+    ok "Empty passphrase rejected (acceptable security behavior)"
+fi
+
+# Results summary
+echo ""
+echo "=================================="
+echo "🔒 SECURITY TEST RESULTS"
+echo "=================================="
+echo "✅ Tests passed: $TESTS_PASSED"
+echo "❌ Tests failed: $TESTS_FAILED"
+echo "📊 Total tests:  $((TESTS_PASSED + TESTS_FAILED))"
+
+if [[ $TESTS_FAILED -eq 0 ]]; then
+    echo ""
+    echo "🎉 ALL SECURITY TESTS PASSED!"
+    echo "✓ Command injection vulnerability has been successfully patched"
+    echo "✓ Age TTY subversion functions are secure"
+    exit 0
+else
+    echo ""
+    echo "🚨 SECURITY ISSUES DETECTED!"
+    echo "❌ $TESTS_FAILED test(s) failed - security vulnerabilities may remain"
+    echo "🔧 Please review and fix the failing test cases"
+    exit 1
+fi

@@ -234,44 +234,51 @@ list_tasks() {
     echo "Task Database Status:"
     echo "════════════════════════════════════════════════════"
     
-    local line_num=0
-    while IFS=$'\t' read -r task_id title assigned_agent state priority parent_task created_date updated_date description; do
-        ((line_num++))
-        [[ $line_num -eq 1 ]] && continue  # Skip header
+    # Use awk for more reliable TSV parsing
+    awk -F'\t' -v filter_agent="$filter_agent" -v filter_state="$filter_state" '
+    BEGIN {
+        # Priority icons
+        priority_icon["CRITICAL"] = "🚨"
+        priority_icon["HIGH"] = "⚡"
+        priority_icon["NORMAL"] = "📋"
+        priority_icon["LOW"] = "⏳"
+    }
+    NR == 1 { next }  # Skip header
+    {
+        # Extract fields with defaults for missing ones
+        task_id = ($1 != "") ? $1 : ""
+        title = ($2 != "") ? $2 : ""
+        assigned_agent = ($3 != "") ? $3 : ""
+        state = ($4 != "") ? $4 : ""
+        priority = ($5 != "") ? $5 : ""
+        parent_task = ($6 != "") ? $6 : ""
+        created_date = ($7 != "") ? $7 : ""
+        updated_date = ($8 != "") ? $8 : ""
+        description = ($9 != "") ? $9 : ""
         
         # Apply filters
-        if [[ -n "$filter_agent" && "$assigned_agent" != "$filter_agent" ]]; then
-            continue
-        fi
+        if (filter_agent != "" && assigned_agent != filter_agent) next
+        if (filter_state != "" && state != filter_state) next
         
-        if [[ -n "$filter_state" && "$state" != "$filter_state" ]]; then
-            continue
-        fi
+        # Format state display
+        state_display = state
+        if (match(state, /FIX_/)) {
+            state_display = "🔧 " state
+        }
         
-        # Format priority icon
-        local priority_icon=""
-        case "$priority" in
-            "CRITICAL") priority_icon="🚨" ;;
-            "HIGH") priority_icon="⚡" ;;
-            "NORMAL") priority_icon="📋" ;;
-            "LOW") priority_icon="⏳" ;;
-        esac
+        # Format parent task
+        parent_display = (parent_task != "") ? "[parent: " parent_task "]" : ""
         
-        # Format state
-        local state_display="$state"
-        if [[ "$state" =~ FIX_ ]]; then
-            state_display="🔧 $state"
-        fi
-        
-        printf "%-12s %s %-30s %s %-12s %-18s %s\n" \
-            "$task_id" \
-            "$priority_icon" \
-            "$title" \
-            "$assigned_agent" \
-            "$state_display" \
-            "$updated_date" \
-            "${parent_task:+[parent: $parent_task]}"
-    done < "$TASKS_FILE"
+        # Print formatted line
+        printf "%-12s %s %-30s %-6s %-18s %-18s %s\n", 
+               task_id, 
+               priority_icon[priority], 
+               title, 
+               assigned_agent, 
+               state_display, 
+               updated_date, 
+               parent_display
+    }' "$TASKS_FILE"
 }
 
 # Generate agent dashboard

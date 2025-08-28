@@ -29,6 +29,7 @@ _temp_register() {
     local temp_path="$1"
     TEMP_FILES+=("$temp_path")
     trace "Registered temp file: $temp_path"
+    return 0
 }
 
 _temp_mktemp() {
@@ -36,6 +37,7 @@ _temp_mktemp() {
     temp_file=$(mktemp "$@")
     _temp_register "$temp_file"
     echo "$temp_file"
+    return 0
 }
 
 _temp_mktemp_d() {
@@ -43,11 +45,13 @@ _temp_mktemp_d() {
     temp_dir=$(mktemp -d "$@")
     _temp_register "$temp_dir"
     echo "$temp_dir"
+    return 0
 }
 
 # Set up cleanup trap (should be called by functions that use temp files)
 _temp_setup_trap() {
     trap '_temp_cleanup' EXIT ERR INT TERM
+    return 0
 }
 
 # Portable realpath --relative-to replacement
@@ -150,11 +154,13 @@ _confirm() {
 is_git_repo() {
     local target_dir="${1:-.}"
     [[ -d "$target_dir/.git" ]] || [[ -d "$target_dir/.gitsim" ]]
+    return 0
 }
 
 is_deployed() {
     local repo_root="$1"
     [[ -f "$repo_root/bin/age-wrapper" ]] && [[ -f "$repo_root/.gitattributes" ]]
+    return 0
 }
 
 # Safety check to prevent lock-out
@@ -246,16 +252,19 @@ _verify_unlock_capability() {
 
 is_dev() {
     [[ "$opt_dev" -eq 1 ]] || [[ -n "${DEV_MODE:-}" ]]
+    return 0
 }
 
 is_locked() {
     local repo_root="$1"
     [[ -f "$repo_root/.locked" ]]
+    return 0
 }
 
 is_unlocked() {
     local repo_root="$1"
     [[ -d "$repo_root/locker" ]] && [[ -f "$repo_root/locker/.padlock" ]]
+    return 0
 }
 
 # Mid-level helpers
@@ -573,6 +582,7 @@ _setup_crypto_with_master() {
 # Guard function for chest mode
 is_chest_repo() {
     [[ -d "$1/.chest" ]]
+    return 0
 }
 
 # State-getter for chest mode
@@ -584,6 +594,7 @@ get_chest_state() {
     else
         echo "unknown"
     fi
+    return 0
 }
 
 # Wrapper for ignition lock process
@@ -1145,4 +1156,242 @@ _get_master_public_key() {
     fi
     
     return 0  # BashFX 3.0 compliance (default case)
+}
+
+################################################################################
+# Ignition Key Creation Functions - Core Implementation
+################################################################################
+
+_create_ignition_master_with_tty_magic() {
+    local name="$1"
+    local passphrase="$2"
+    
+    trace "Creating ignition master key with TTY magic: $name"
+    
+    # Setup temp file cleanup
+    _temp_setup_trap
+    
+    # Create directory structure
+    mkdir -p "$PADLOCK_DIR/ignition/keys"
+    mkdir -p "$PADLOCK_DIR/ignition/metadata"
+    mkdir -p "$PADLOCK_DIR/ignition/.derived"
+    
+    # Generate base age key  
+    local temp_key="$(_temp_mktemp)"
+    age-keygen > "$temp_key"
+    
+    # Create JSON metadata bundle
+    local metadata
+    metadata=$(_create_ignition_metadata "$name" "ignition-master")
+    
+    # Create key bundle (metadata + private key)
+    local key_bundle="$(_temp_mktemp)"
+    {
+        echo "PADLOCK_IGNITION_KEY"
+        echo "$metadata" | base64 -w0
+        echo "---"
+        cat "$temp_key"
+    } > "$key_bundle"
+    
+    # TTY magic: encrypt bundle with passphrase
+    local passphrase_encrypted="$(_temp_mktemp)"
+    if _age_interactive_encrypt "$key_bundle" "$passphrase_encrypted" "$passphrase"; then
+        # Double-encrypt with master key authority
+        local master_pubkey
+        master_pubkey=$(_get_master_public_key)
+        age -r "$master_pubkey" < "$passphrase_encrypted" > "$PADLOCK_DIR/ignition/keys/$name.ikey"
+        
+        # Store metadata separately for queries
+        echo "$metadata" > "$PADLOCK_DIR/ignition/metadata/$name.json"
+        
+        okay "Ignition master key created with TTY magic: $name"
+        return 0
+    else
+        error "Failed to create ignition master key: $name"
+        return 1
+    fi
+}
+
+_create_ignition_distro_with_tty_magic() {
+    local name="$1"
+    local passphrase="$2"
+    
+    trace "Creating ignition distributed key with TTY magic: $name"
+    
+    # Setup temp file cleanup
+    _temp_setup_trap
+    
+    # Generate base age key  
+    local temp_key="$(_temp_mktemp)"
+    age-keygen > "$temp_key"
+    
+    # Create JSON metadata bundle
+    local metadata
+    metadata=$(_create_ignition_metadata "$name" "ignition-distributed")
+    
+    # Create key bundle (metadata + private key)
+    local key_bundle="$(_temp_mktemp)"
+    {
+        echo "PADLOCK_IGNITION_DISTRO"
+        echo "$metadata" | base64 -w0
+        echo "---"
+        cat "$temp_key"
+    } > "$key_bundle"
+    
+    # TTY magic: encrypt bundle with passphrase
+    local passphrase_encrypted="$(_temp_mktemp)"
+    if _age_interactive_encrypt "$key_bundle" "$passphrase_encrypted" "$passphrase"; then
+        # Double-encrypt with master key authority
+        local master_pubkey
+        master_pubkey=$(_get_master_public_key)
+        age -r "$master_pubkey" < "$passphrase_encrypted" > "$PADLOCK_DIR/ignition/keys/$name.dkey"
+        
+        # Store metadata separately for queries
+        echo "$metadata" > "$PADLOCK_DIR/ignition/metadata/$name.json"
+        
+        okay "Ignition distributed key created with TTY magic: $name"
+        return 0
+    else
+        error "Failed to create ignition distributed key: $name"
+        return 1
+    fi
+}
+
+_unlock_ignition_with_tty_magic() {
+    local name="$1"
+    local passphrase="$2"
+    
+    trace "Unlocking ignition key with TTY magic: $name"
+    
+    # Setup temp file cleanup
+    _temp_setup_trap
+    
+    # Find key file (master or distro)
+    local key_file=""
+    if [[ -f "$PADLOCK_DIR/ignition/keys/$name.ikey" ]]; then
+        key_file="$PADLOCK_DIR/ignition/keys/$name.ikey"
+    elif [[ -f "$PADLOCK_DIR/ignition/keys/$name.dkey" ]]; then
+        key_file="$PADLOCK_DIR/ignition/keys/$name.dkey"
+    else
+        error "No ignition key found: $name"
+        return 1
+    fi
+    
+    # Validate master key authority first
+    if ! _validate_ignition_authority "$key_file"; then
+        return 1
+    fi
+    
+    # Decrypt with master key first  
+    local temp_bundle="$(_temp_mktemp)"
+    local master_private="$(_get_master_private_key)"
+    
+    if ! age -d -i "$master_private" < "$key_file" > "$temp_bundle"; then
+        error "Cannot decrypt ignition key (master key access denied)"
+        return 1
+    fi
+    
+    # Use TTY subversion to decrypt with passphrase
+    local decrypted_bundle="$(_temp_mktemp)"
+    if _age_interactive_decrypt "$temp_bundle" "$passphrase" > "$decrypted_bundle"; then
+        # Extract private key from decrypted bundle
+        local private_key
+        private_key=$(sed -n '4,$p' "$decrypted_bundle")
+        
+        # Export for repository access
+        export PADLOCK_IGNITION_KEY="$private_key"
+        
+        okay "Ignition key unlocked with TTY magic: $name"
+        return 0
+    else
+        error "Incorrect passphrase for ignition key: $name"
+        return 1
+    fi
+}
+
+################################################################################
+# Ignition System Utility Functions
+################################################################################
+
+_list_ignition_keys() {
+    echo "Available ignition keys:"
+    if [[ -d "$PADLOCK_DIR/ignition/keys" ]]; then
+        local found=0
+        for key_file in "$PADLOCK_DIR/ignition/keys"/*.{ikey,dkey}; do
+            if [[ -f "$key_file" ]]; then
+                local basename_file
+                basename_file=$(basename "$key_file")
+                local name="${basename_file%.*}"
+                local type="${basename_file##*.}"
+                case "$type" in
+                    ikey) echo "  $name (ignition master)" ;;
+                    dkey) echo "  $name (distributed)" ;;
+                esac
+                found=1
+            fi
+        done
+        if [[ $found -eq 0 ]]; then
+            info "No ignition keys found"
+        fi
+    else
+        info "No ignition keys directory found"
+    fi
+    
+    return 0
+}
+
+_show_ignition_status() {
+    local name="$1"
+    
+    if [[ -n "$name" ]]; then
+        # Show specific key status
+        local metadata_file="$PADLOCK_DIR/ignition/metadata/$name.json"
+        if [[ -f "$metadata_file" ]]; then
+            echo "Ignition key status: $name"
+            if command -v jq >/dev/null 2>&1; then
+                jq -r '. | "Type: \(.type)\nCreated: \(.created)\nAuthority: \(.authority)"' < "$metadata_file"
+            else
+                # Fallback without jq
+                echo "Metadata file: $metadata_file"
+                cat "$metadata_file"
+            fi
+        else
+            error "No metadata found for ignition key: $name"
+            return 1
+        fi
+    else
+        # Show general ignition system status
+        echo "Ignition system status:"
+        echo "Keys directory: $PADLOCK_DIR/ignition/keys"
+        echo "Available keys:"
+        _list_ignition_keys
+    fi
+    
+    return 0
+}
+
+_add_ignition_authority() {
+    local pubkey="$1"
+    
+    # Implementation for allowing additional public keys
+    # This would extend the authority system beyond just master key
+    warn "Ignition authority extension not yet implemented"
+    info "Currently only master key authority is supported"
+    
+    return 0
+}
+
+help_ignite() {
+    echo "Ignition Key Operations (I & D keys):"
+    echo "  create [name]           Create ignition master key (I)"
+    echo "  new --name=NAME         Create distributed key (D)"  
+    echo "  unlock [name]           Unlock with passphrase"
+    echo "  allow <pubkey>          Allow public key access"
+    echo "  list                    Show available ignition keys"
+    echo "  status [name]           Show key metadata"
+    echo ""
+    echo "Environment: PADLOCK_IGNITION_PASS for automated unlock"
+    echo "For detailed help: padlock help more"
+    
+    return 0
 }
