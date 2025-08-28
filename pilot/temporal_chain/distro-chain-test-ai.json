@@ -1,0 +1,11 @@
+{"chain_id": "c66b3f3966d60f61", "blocks": [{
+    "type": "distro",
+    "name": "test-ai",
+    "chain_id": "c66b3f3966d60f61",
+    "epoch": 1756362994,
+    "height": 1,
+    "authority": "ignition-master",
+    "expires": 1756366594,
+    "passphrase_hint": "test***",
+    "created": "2025-08-28T06:36:34+00:00"
+}]}

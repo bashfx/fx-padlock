@@ -1,0 +1,5 @@
+TYPE=ignition-master
+NAME=bench-1
+CREATED=2025-08-28T06:39:23+00:00
+AUTHORITY=master
+KEY_DERIVATION=sha512-passphrase

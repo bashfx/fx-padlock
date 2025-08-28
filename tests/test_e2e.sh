@@ -15,7 +15,13 @@ run_e2e_test() {
     # Create test environment
     local test_dir
     test_dir=$(setup_test_environment)
+    local original_dir="$PWD"
     echo "│ ✓ Created test environment: $(basename "$test_dir")"
+    
+    # Set up cleanup for test artifacts (including mock skull backup)
+    local padlock_keys="${XDG_ETC_HOME:-$HOME/.local/etc}/padlock/keys"
+    local mock_skull="$padlock_keys/skull.age"
+    trap "cd '$original_dir' 2>/dev/null; rm -rf '$test_dir' 2>/dev/null; rm -f '$mock_skull' 2>/dev/null" RETURN
 
     # Copy padlock to test directory
     cp "$SCRIPT_DIR/padlock.sh" "$test_dir/"
@@ -58,6 +64,11 @@ run_e2e_test() {
         echo "│ ✗ Padlock deployment failed"
         return 1
     fi
+    
+    # Create mock skull backup for testing (satisfies safety check)
+    mkdir -p "$padlock_keys"
+    echo "test-mock-skull-backup" > "$mock_skull"
+    chmod 600 "$mock_skull"
 
     # Verify infrastructure
     if [[ -f "bin/padlock" && -d "locker" && -f "locker/.padlock" ]]; then

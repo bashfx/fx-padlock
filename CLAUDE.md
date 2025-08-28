@@ -1,33 +1,6 @@
 # CLAUDE.md - Project Context & Workflow
 
-## Important Note
-
-### Key Insights from GitSim v2.1 Development
-
-**BashFX 2.1 Critical Patterns Discovered:**
-
-1. **Template Function Returns**: All template creation functions MUST end with explicit `return 0` 
-   - Issue: `trace` function returns exit code of test condition when `opt_trace=false`
-   - Solution: Always add `return 0` to template functions that end with trace/logging calls
-
-2. **Exit Code Propagation**: BashFX main pattern needs explicit exit handling
-   - Add `return $?` to main() function after dispatch call
-   - Add `exit $ret` after capturing main return code
-   - Critical for error detection in test suites and CI/CD
-
-3. **Argument Filtering Complexity**: Command-specific vs global flags require careful handling
-   - Global flags: `-d|--debug|-t|--trace|-q|--quiet|-y|--yes|-D|--dev|-h|--help`
-   - Command flags: `-m|--allow-empty|--template=*|--porcelain|--force`
-   - Syntax errors in one part can break subsequent parts (unclosed heredocs)
-
-4. **Heredoc Safety**: Always validate heredoc closure in template functions
-   - Use `grep -n "cat.*<<.*EOF" parts/*.sh` to find all heredocs
-   - Verify each has corresponding `EOF` closure
-   - Unclosed heredocs silently break script loading of later parts
-
-5. **Logo UI Pattern**: Conditional logo display for scripting vs interactive use
-   - Skip logo for data-returning commands: `home-path`, `version`
-   - Show logo for user-facing commands: `init`, `template`, etc.
+# Important: BashFX Architecture has recently been updated to v3.0.0
 
 ## General Development Patterns
 
@@ -94,6 +67,10 @@ Use case-insensitive search. Check project root, `doc*` directories, and `locker
 - `src/` (Rust), `parts/` (BashFX using the build.sh pattern)
 - Legacy/reference files (`.txt`, `*ref*` folders)
 
+**f. Archived/Historic**
+- `docs/archive` stores previous and older versions of files for additional context these files should
+be marked for removal to the user if the content is no longer needed.
+
 ### 2. Plan Execution
 
 1. **Analyze** key files to determine next tasks
@@ -135,6 +112,38 @@ Use case-insensitive search. Check project root, `doc*` directories, and `locker
 Use `<cmd> help` for detailed APIs.
 
 - Report any tool problems immediately.
+
+
+## Important Note
+
+### Key Insights from GitSim v2.1 Development
+
+**BashFX 2.1 Critical Patterns Discovered:**
+
+1. **Template Function Returns**: All template creation functions MUST end with explicit `return 0` 
+   - Issue: `trace` function returns exit code of test condition when `opt_trace=false`
+   - Solution: Always add `return 0` to template functions that end with trace/logging calls
+
+2. **Exit Code Propagation**: BashFX main pattern needs explicit exit handling
+   - Add `return $?` to main() function after dispatch call
+   - Add `exit $ret` after capturing main return code
+   - Critical for error detection in test suites and CI/CD
+
+3. **Argument Filtering Complexity**: Command-specific vs global flags require careful handling
+   - Global flags: `-d|--debug|-t|--trace|-q|--quiet|-y|--yes|-D|--dev|-h|--help`
+   - Command flags: `-m|--allow-empty|--template=*|--porcelain|--force`
+   - Syntax errors in one part can break subsequent parts (unclosed heredocs)
+
+4. **Heredoc Safety**: Always validate heredoc closure in template functions
+   - Use `grep -n "cat.*<<.*EOF" parts/*.sh` to find all heredocs
+   - Verify each has corresponding `EOF` closure
+   - Unclosed heredocs silently break script loading of later parts
+
+5. **Logo UI Pattern**: Conditional logo display for scripting vs interactive use
+   - Skip logo for data-returning commands: `home-path`, `version`
+   - Show logo for user-facing commands: `init`, `template`, etc.
+
+
 
 ## Plan X Pilot Methodology: Architectural Decision Framework
 

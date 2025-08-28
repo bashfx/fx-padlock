@@ -395,7 +395,7 @@ if [[ "$list_only" == true ]]; then
         exit 1
     fi
     
-    local modules=()
+    modules=()
     if [[ "$USE_BUILD_MAP" == true ]]; then
         for num in $(printf '%s\n' "${!build_map_targets[@]}" | sort -n); do
             local target="${build_map_targets[$num]}"

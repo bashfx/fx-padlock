@@ -1,0 +1,5 @@
+TYPE=ignition-master
+NAME=perf-test
+CREATED=2025-08-28T06:39:42+00:00
+AUTHORITY=master
+KEY_DERIVATION=sha512-passphrase

@@ -1,0 +1,12 @@
+{"chain_id": "0f08f0edd59312df", "blocks": [{
+    "type": "ignition-master",
+    "name": "default",
+    "chain_id": "0f08f0edd59312df",
+    "epoch": 1756362994,
+    "height": 1,
+    "previous_hash": "",
+    "block_hash": "4424b7c194d754107f61ecebce243acd17d5703d61559e5b89a098cf2d1c360b",
+    "expires": 1756449394,
+    "passphrase_hint": "test***",
+    "created": "2025-08-28T06:36:34+00:00"
+}]}

@@ -1,0 +1,6 @@
+TYPE=ignition-master
+NAME=bench-3  
+CREATED=2025-08-28T06:37:33+00:00
+AUTHORITY=master
+PASSPHRASE_HINT=test***
+---

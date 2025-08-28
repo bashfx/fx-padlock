@@ -1,0 +1,6 @@
+TYPE=distro
+NAME=test-ai
+CREATED=2025-08-28T06:39:51+00:00
+SSH_FINGERPRINT=SHA256:gRudYerkalm7IXATC4KsKiNEREr0xrpE6ZNIFSVdWrU
+CERTIFICATE=./pilot/ssh_delegation/distro-test-ai-cert.pub
+AUTHORITY=ignition-master

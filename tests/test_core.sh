@@ -91,11 +91,11 @@ run_security_commands_test() {
     echo "│ ✓ Isolated environment ready"
     echo "│ Verifying enhanced command structure..."
     
-    # Verify commands exist in help
+    # Verify commands exist in help (using detailed help for complete command list)
     local help_output
-    help_output=$(./padlock.sh help 2>&1)
+    help_output=$(./padlock.sh help more 2>&1)
     
-    for cmd in setup key declamp revoke repair map unmap; do
+    for cmd in clamp key declamp revoke repair map unmap; do
         if echo "$help_output" | grep -q "$cmd"; then
             echo "│ ✓ $cmd command in help"
         else
@@ -109,7 +109,7 @@ run_security_commands_test() {
     echo
     
     # Test each command responds correctly when called without context
-    local commands=("setup" "key" "declamp" "revoke" "repair" "map" "unmap")
+    local commands=("clamp" "key" "declamp" "revoke" "repair" "map" "unmap")
     
     for cmd in "${commands[@]}"; do
         if timeout 10s ./padlock.sh "$cmd" > /dev/null 2>&1; then

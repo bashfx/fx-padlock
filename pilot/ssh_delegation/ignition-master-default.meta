@@ -1,0 +1,5 @@
+TYPE=ignition-master
+NAME=default
+CREATED=2025-08-28T06:39:51+00:00
+SSH_FINGERPRINT=SHA256:yCZRynEnh7o9m2OrIeZgO6Q/9GsXq5pKAA5nofEotjM
+CERTIFICATE=./pilot/ssh_delegation/ignition-master-default-cert.pub
