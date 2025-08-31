@@ -1,0 +1,18 @@
+{
+  "name": "dev-distro",
+  "type": "distro",
+  "created": "2025-08-29T08:36:40+00:00",
+  "updated": "2025-08-29T08:36:40+00:00",
+  "key_file": "dev-distro.dkey",
+  "fingerprint": "3ad7718efe4f0dc0",
+  "encrypted": true,
+  "status": "active",
+  "authority": {
+    "master_key": true,
+    "repo_key": true
+  },
+  "usage": {
+    "unlock_count": 0,
+    "last_used": null
+  }
+}

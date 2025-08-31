@@ -1194,9 +1194,15 @@ list_tasks() {
         [[ -n "$filter_agent" && "$assigned_agent" != "$filter_agent" ]] && continue
         [[ -n "$filter_state" && "$state" != "$filter_state" ]] && continue
         
-        # Priority icons and codes
+        # Priority icons and codes with coloring
         local priority_icon="${PRIORITY_ICONS[$priority]:-📋}"
         local priority_code="${PRIORITY_CODES[$priority]:-NORM}"
+        local colored_priority_code=$(colorize "$priority_code" "${PRIORITY_COLORS[$priority]:-cyan}")
+        
+        # Add bold emphasis for CRITICAL and URGENT priorities
+        if [[ "$priority" == "CRITICAL" || "$priority" == "URGENT" ]]; then
+            colored_priority_code=$(colorize "$(colorize "$priority_code" "bold")" "${PRIORITY_COLORS[$priority]:-red}")
+        fi
         
         # Format state display with icon and 4-letter code
         local state_icon="${TASK_STATE_ICONS[$state]:-📋}"
@@ -1218,11 +1224,11 @@ list_tasks() {
         local parent_display=""
         [[ -n "$parent_task" ]] && parent_display="[parent: $parent_task]"
         
-        # Print formatted line
+        # Print formatted line with colored priority code
         printf "%-12s %s%s %-30s %-6s %-4s %-18s %s\n" \
                "$task_id" \
                "$priority_icon" \
-               "$priority_code" \
+               "$colored_priority_code" \
                "$colored_title" \
                "$assigned_agent" \
                "$colored_state" \
@@ -1246,7 +1252,13 @@ format_with_ellipsis() {
 }
 
 # Show comprehensive status with dependency tree
-show_status() {
+
+
+# FUNC_META | src:/home/xnull/repos/shell/bashfx/fx-padlock/xbin/taskdb.sh | src_sum:e46d4579e568128505d76c2526c11fbcd124a95bd653843300150ab2ea0bab4c | orig:show_status | edit:show_status_colored | orig_sum:b1f2eef8f8565b1e011963862d88cecb3cd6762287c456b958784647fa02b418
+
+
+# FUNC_META | src:/home/xnull/repos/shell/bashfx/fx-padlock/xbin/taskdb.sh | src_sum:50afd0feeb5e7757f93a2a0ea583c24ee7ee529931e5cc4641358d042f40294a | orig:show_status_colored | edit:show_status_fixed | orig_sum:ebbd71bdaf4e18c17e9193cc7b72b34a0294afe5759f01eb6ca71c10fe6567eb
+show_status_fixed() {
     echo "════════════════════════════════════════════════════════════════════════════════════════════════"
     echo "                                    TASK DATABASE - DEPENDENCY STATUS                            "
     echo "════════════════════════════════════════════════════════════════════════════════════════════════"
@@ -1287,19 +1299,29 @@ show_status() {
         local indent="$2"
         local is_child="$3"
         
-        # Get priority icon
+        # Get priority icon and colors
+        local priority="${task_priorities[$task_id]:-}"
         local priority_icon=""
-        case "${task_priorities[$task_id]:-}" in
+        case "$priority" in
             "CRITICAL") priority_icon="🚨" ;;
             "HIGH") priority_icon="⚡" ;;
             "NORMAL") priority_icon="📋" ;;
             "LOW") priority_icon="⏳" ;;
         esac
         
-        # Format state with visual indicators
-        local state_display="${task_states[$task_id]:-}"
+        # Format state with visual indicators and colors
+        local state="${task_states[$task_id]:-}"
+        local state_display="$state"
         if [[ "$state_display" =~ FIX_ ]]; then
             state_display="🔧 $state_display"
+        fi
+        
+        # Apply colors to state (with safety check)
+        local colored_state="$state_display"
+        if [[ -n "$state" ]] && [[ -v STATUS_COLORS[$state] ]]; then
+            colored_state=$(colorize "$state_display" "${STATUS_COLORS[$state]}")
+        elif [[ -n "$state_display" ]]; then
+            colored_state=$(colorize "$state_display" "cyan")
         fi
         
         # Add tree structure indicators
@@ -1318,9 +1340,19 @@ show_status() {
         local formatted_parent
         
         formatted_id=$(format_with_ellipsis "${tree_prefix}${task_id}" 18)
-        formatted_title=$(format_with_ellipsis "${task_titles[$task_id]:-}" 25)
+        
+        # Apply title colors based on priority (with safety checks)
+        local title="${task_titles[$task_id]:-}"
+        local colored_title="$title"
+        if [[ "$priority" == "CRITICAL" ]] && [[ -v PRIORITY_COLORS[CRITICAL] ]]; then
+            colored_title=$(colorize "$(colorize "$title" "bold")" "${PRIORITY_COLORS[CRITICAL]}")
+        elif [[ "$priority" == "HIGH" ]] && [[ -v PRIORITY_COLORS[HIGH] ]]; then
+            colored_title=$(colorize "$title" "${PRIORITY_COLORS[HIGH]}")
+        fi
+        
+        formatted_title=$(format_with_ellipsis "$colored_title" 25)
         formatted_agent=$(format_with_ellipsis "${task_agents[$task_id]:-}" 8)
-        formatted_state=$(format_with_ellipsis "$state_display" 15)
+        formatted_state=$(format_with_ellipsis "$colored_state" 15)
         local updated_val="${task_updated[$task_id]:-}"
         local created_val="${task_created[$task_id]:-}"
         formatted_updated=$(format_with_ellipsis "${updated_val##* }" 12)  # Just time part
@@ -1373,13 +1405,171 @@ show_status() {
     
     for state in ASSIGNED IN_PROGRESS DEV_COMPLETE REVIEW_PENDING ISSUES_FOUND FIX_ASSIGNED FIX_IN_PROGRESS FIX_COMPLETE VALIDATED PRODUCTION_READY; do
         if [[ ${state_counts[$state]:-0} -gt 0 ]]; then
-            echo "  $state: ${state_counts[$state]:-0} task(s)"
+            local colored_state_name="$state"
+            if [[ -v STATUS_COLORS[$state] ]]; then
+                colored_state_name=$(colorize "$state" "${STATUS_COLORS[$state]}")
+            else
+                colored_state_name=$(colorize "$state" "cyan")
+            fi
+            echo "  $colored_state_name: ${state_counts[$state]:-0} task(s)"
         fi
     done
     
     echo ""
     echo "💡 Use 'taskdb.sh show TASK-ID' to drill down into specific task details"
 }
+
+show_status_colored() {
+    echo "════════════════════════════════════════════════════════════════════════════════════════════════"
+    echo "                                    TASK DATABASE - DEPENDENCY STATUS                            "
+    echo "════════════════════════════════════════════════════════════════════════════════════════════════"
+    echo ""
+    
+    # Header
+    printf "%-18s %-3s %-25s %-8s %-15s %-12s %-19s %-10s\n" \
+           "TASK ID" "PRI" "TITLE" "AGENT" "STATE" "UPDATED" "CREATED" "PARENT"
+    echo "────────────────────────────────────────────────────────────────────────────────────────────────"
+    
+    # Build task maps for dependency resolution
+    declare -A task_titles task_agents task_states task_priorities task_created task_updated task_parents
+    declare -A children_map
+    declare -a root_tasks
+    
+    # Read all tasks and build lookup maps
+    while IFS='|' read -r task_id title assigned_agent state priority parent_task created_date updated_date description; do
+        [[ "$task_id" == "task_id" ]] && continue  # Skip header
+        
+        task_titles["$task_id"]="$title"
+        task_agents["$task_id"]="$assigned_agent"
+        task_states["$task_id"]="$state"
+        task_priorities["$task_id"]="$priority"
+        task_created["$task_id"]="$created_date"
+        task_updated["$task_id"]="$updated_date"
+        task_parents["$task_id"]="$parent_task"
+        
+        if [[ -n "$parent_task" ]]; then
+            children_map["$parent_task"]+="$task_id "
+        else
+            root_tasks+=("$task_id")
+        fi
+    done < "$TASKS_FILE"
+    
+    # Function to print task and its children recursively
+    print_task_tree() {
+        local task_id="$1"
+        local indent="$2"
+        local is_child="$3"
+        
+        # Get priority icon and colors
+        local priority="${task_priorities[$task_id]:-}"
+        local priority_icon=""
+        case "$priority" in
+            "CRITICAL") priority_icon="🚨" ;;
+            "HIGH") priority_icon="⚡" ;;
+            "NORMAL") priority_icon="📋" ;;
+            "LOW") priority_icon="⏳" ;;
+        esac
+        
+        # Format state with visual indicators and colors
+        local state="${task_states[$task_id]:-}"
+        local state_display="$state"
+        if [[ "$state_display" =~ FIX_ ]]; then
+            state_display="🔧 $state_display"
+        fi
+        
+        # Apply colors to state
+        local colored_state=$(colorize "$state_display" "${STATUS_COLORS[$state]:-cyan}")
+        
+        # Add tree structure indicators
+        local tree_prefix=""
+        if [[ "$is_child" == "true" ]]; then
+            tree_prefix="$indent├─ "
+        fi
+        
+        # Format and print the task line
+        local formatted_id
+        local formatted_title
+        local formatted_agent
+        local formatted_state
+        local formatted_updated
+        local formatted_created
+        local formatted_parent
+        
+        formatted_id=$(format_with_ellipsis "${tree_prefix}${task_id}" 18)
+        
+        # Apply title colors based on priority
+        local title="${task_titles[$task_id]:-}"
+        local colored_title="$title"
+        if [[ "$priority" == "CRITICAL" ]]; then
+            colored_title=$(colorize "$(colorize "$title" "bold")" "${PRIORITY_COLORS[CRITICAL]:-red}")
+        elif [[ "$priority" == "HIGH" ]]; then
+            colored_title=$(colorize "$title" "${PRIORITY_COLORS[HIGH]:-yellow}")
+        fi
+        
+        formatted_title=$(format_with_ellipsis "$colored_title" 25)
+        formatted_agent=$(format_with_ellipsis "${task_agents[$task_id]:-}" 8)
+        formatted_state=$(format_with_ellipsis "$colored_state" 15)
+        local updated_val="${task_updated[$task_id]:-}"
+        local created_val="${task_created[$task_id]:-}"
+        formatted_updated=$(format_with_ellipsis "${updated_val##* }" 12)  # Just time part
+        formatted_created=$(format_with_ellipsis "${created_val##* }" 19)  # Just time part  
+        formatted_parent=$(format_with_ellipsis "${task_parents[$task_id]:-}" 10)
+        
+        printf "%s %s %s %s %s %s %s %s\n" \
+               "$formatted_id" \
+               "$priority_icon" \
+               "$formatted_title" \
+               "$formatted_agent" \
+               "$formatted_state" \
+               "$formatted_updated" \
+               "$formatted_created" \
+               "$formatted_parent"
+        
+        # Print children with increased indentation
+        if [[ -n "${children_map[$task_id]:-}" ]]; then
+            local child_indent="$indent  "
+            for child_id in ${children_map[$task_id]:-}; do
+                print_task_tree "$child_id" "$child_indent" "true"
+            done
+        fi
+    }
+    
+    # Sort root tasks by priority (CRITICAL first, then by task_id)
+    IFS=$'\n' sorted_roots=($(printf '%s\n' "${root_tasks[@]}" | sort -t'|' -k1,1))
+    
+    # Print root tasks and their dependency trees
+    for task_id in "${sorted_roots[@]}"; do
+        print_task_tree "$task_id" "" "false"
+    done
+    
+    echo ""
+    echo "════════════════════════════════════════════════════════════════════════════════════════════════"
+    echo ""
+    echo "📊 SUMMARY:"
+    
+    # Count tasks by state
+    declare -A state_counts
+    set +u  # Temporarily disable undefined variable errors for associative arrays
+    for task_id in "${!task_states[@]}"; do
+        local state="${task_states[$task_id]:-}"
+        if [[ -n "$state" ]]; then
+            local current_count="${state_counts[$state]:-0}"
+            state_counts["$state"]=$((current_count + 1))
+        fi
+    done
+    set -u  # Re-enable undefined variable errors
+    
+    for state in ASSIGNED IN_PROGRESS DEV_COMPLETE REVIEW_PENDING ISSUES_FOUND FIX_ASSIGNED FIX_IN_PROGRESS FIX_COMPLETE VALIDATED PRODUCTION_READY; do
+        if [[ ${state_counts[$state]:-0} -gt 0 ]]; then
+            local colored_state_name=$(colorize "$state" "${STATUS_COLORS[$state]:-cyan}")
+            echo "  $colored_state_name: ${state_counts[$state]:-0} task(s)"
+        fi
+    done
+    
+    echo ""
+    echo "💡 Use 'taskdb.sh show TASK-ID' to drill down into specific task details"
+}
+
 
 # Generate agent dashboard
 agent_dashboard() {
@@ -2327,7 +2517,7 @@ main() {
             list_tasks "$@"
             ;;
         "status")
-            show_status
+            show_status_fixed
             ;;
         "dashboard")
             [[ $# -lt 1 ]] && { echo "Usage: dashboard AGENT"; exit 1; }

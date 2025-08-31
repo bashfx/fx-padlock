@@ -58,19 +58,12 @@
 ### **🔬 Strategic Research**
 → **`research/`** - 11 strategic research files for competitive advantages
 
-### **📚 Knowledge Base Reference**
-→ **`kb/KB_PILOT_PLANX.md`** - Complete pilot study and approach analysis  
-→ **`kb/KB_REORG_PLAN.md`** - Knowledge base cleanup methodology  
-→ **`kb/KB_CONSOLIDATION_METHODOLOGY.md`** - Step-by-step consolidation process
-→ **`kb/KB_RX_METHODOLOGY.md`** - Systematic research framework
-
-### **👥 Agent Personas**  
-→ **`kb/personas/RRR_RESEARCH.md`** - Rachel: Radical researcher & R&D specialist  
-→ **`kb/personas/LSE_ENGINEERING.md`** - Lucas: Legendary script engineer & BashFX evangelist  
-→ **`kb/personas/QA_ENFORCEMENT.md`** - Queen: Quality assurance enforcer & standards guardian  
-→ **`kb/personas/FXAA_ARCHITECTURE.md`** - Felix: BashFX architecture analyst & FX enthusiast  
-→ **`kb/personas/PRD_PRODUCT.md`** - Pedro: Product manager & strategic MVP coordinator  
-→ **`kb/personas/OXX_ORCHESTRATION.md`** - Omar: Orchestrator & collaborative team conductor
+### **📚 Knowledge Base System**
+→ **KB Migration Complete**: Universal knowledge ecosystem moved to ~/repos/instrux/ixpq/
+→ **Agent Personas**: 9 complete personas with real-world personality references  
+→ **Systematic Methodologies**: 4 core frameworks for knowledge and team management
+→ **Protocol Libraries**: Reusable workflow patterns organized by domain
+→ **Management Tooling**: bin/kb-* utilities for maintenance and validation
 
 ## ⚡ COORDINATION STATUS
 

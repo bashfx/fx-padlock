@@ -1,0 +1,18 @@
+{
+  "name": "export-test",
+  "type": "distro",
+  "created": "2025-08-29T08:41:44+00:00",
+  "updated": "2025-08-29T08:41:44+00:00",
+  "key_file": "export-test.dkey",
+  "fingerprint": "19baa10802b6739b",
+  "encrypted": true,
+  "status": "active",
+  "authority": {
+    "master_key": true,
+    "repo_key": true
+  },
+  "usage": {
+    "unlock_count": 0,
+    "last_used": null
+  }
+}

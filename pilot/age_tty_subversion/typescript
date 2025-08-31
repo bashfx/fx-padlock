@@ -1,0 +1,3 @@
+Script started on 2025-08-29 09:41:48+00:00 [COMMAND="cat pipe1c | age -p -o output1c.age test_input.txt" <not executed on terminal>]
+Enter passphrase (leave empty to autogenerate a secure one): 
+Script done on 2025-08-29 09:41:55+00:00 [COMMAND_EXIT_CODE="0"]

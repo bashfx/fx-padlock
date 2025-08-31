@@ -1,0 +1,5 @@
+TYPE=ignition-master
+NAME=debug-test-1
+CREATED=2025-08-29T09:15:18+00:00
+AUTHORITY=master
+KEY_DERIVATION=sha512-passphrase

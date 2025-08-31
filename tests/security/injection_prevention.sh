@@ -19,12 +19,34 @@ echo
 
 # Setup gitsim test environment
 setup_test_env() {
+    # Create temp directory and initialize gitsim there
+    local temp_dir
+    temp_dir=$(mktemp -d)
+    cd "$temp_dir"
+    
     if gitsim home-init injection-test > /dev/null 2>&1; then
         local sim_home
         sim_home=$(gitsim home-path 2>/dev/null)
-        export HOME="$sim_home"
-        export XDG_ETC_HOME="$sim_home/.local/etc"
-        cd "$sim_home"
+        if [[ -n "$sim_home" && -d "$sim_home" ]]; then
+            export XDG_ETC_HOME="$sim_home/.local/etc"
+            export XDG_DATA_HOME="$sim_home/.local/data"
+            export XDG_CACHE_HOME="$sim_home/.cache"
+            cd "$sim_home"
+            
+            # Store temp dir for cleanup
+            export GITSIM_TEMP_DIR="$temp_dir"
+        else
+            echo "⚠️  gitsim home-path returned invalid path, falling back"
+            cd "$SCRIPT_DIR"
+            rm -rf "$temp_dir"
+            return 1
+        fi
+    else
+        echo "⚠️  gitsim home-init failed, falling back"
+        cd "$SCRIPT_DIR"
+        rm -rf "$temp_dir"
+        return 1
+    fi
         
         # Copy necessary parts for testing
         mkdir -p parts
@@ -85,7 +107,7 @@ if ! setup_test_env; then
     
     opt_trace=1
     opt_quiet=0
-    opt_debug=0
+    opt_debug=1
     
     _temp_setup_trap
     

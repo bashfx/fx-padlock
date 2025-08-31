@@ -1,0 +1,15 @@
+[user]
+    name = xnull
+    email = xnull@example.com
+[init]
+    defaultBranch = main
+[core]
+    editor = /usr/bin/nano
+[alias]
+    st = status
+    co = checkout
+    br = branch
+    ci = commit
+    unstage = reset HEAD --
+    last = log -1 HEAD
+    visual = !gitk

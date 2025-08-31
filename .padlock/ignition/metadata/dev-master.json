@@ -1,0 +1,18 @@
+{
+  "name": "dev-master",
+  "type": "master",
+  "created": "2025-08-29T08:35:58+00:00",
+  "updated": "2025-08-29T08:35:58+00:00",
+  "key_file": "dev-master.ikey",
+  "fingerprint": "6af87641c724001c",
+  "encrypted": true,
+  "status": "active",
+  "authority": {
+    "master_key": true,
+    "repo_key": true
+  },
+  "usage": {
+    "unlock_count": 0,
+    "last_used": null
+  }
+}
