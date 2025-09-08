@@ -144,94 +144,6 @@ rename_from_build_map() {
     printf "\n%s✓ Rename complete!%s\n" "$green" "$x"
 }
 
-# Enhanced build management functions (from protobuild.sh)
-
-# Insert module at position
-insert_module() {
-    local file="$1" pos="${2:-99}"
-    [[ -n "$file" ]] || { echo "Usage: insert <filename> [position]"; exit 1; }
-    [[ -f "$PARTS_DIR/$file" ]] || { echo "Module not found: $file"; exit 1; }
-    
-    local temp_map=$(mktemp)
-    
-    # Insert at position
-    {
-        awk -v pos="$pos" -v file="$file" -F: '
-        BEGIN { inserted = 0 }
-        {
-            curr_pos = int($1)
-            if (!inserted && curr_pos >= pos) {
-                printf "%02d : %s\n", pos, file
-                inserted = 1
-            }
-            if (curr_pos != pos) print
-        }
-        END { if (!inserted) printf "%02d : %s\n", pos, file }
-        ' "$BUILD_MAP"
-    } > "$temp_map"
-    
-    mv "$temp_map" "$BUILD_MAP"
-    printf "%s✓ Inserted %s at position %s%s\n" "$green" "$file" "$pos" "$x"
-}
-
-# Swap module positions
-swap_modules() {
-    local pos1="$1" pos2="$2"
-    [[ -n "$pos1" && -n "$pos2" ]] || { echo "Usage: swap <pos1> <pos2>"; exit 1; }
-    
-    local temp_map=$(mktemp)
-    
-    awk -v p1="$pos1" -v p2="$pos2" -F: '
-    { pos[int($1)] = $2 }
-    END {
-        temp = pos[p1]; pos[p1] = pos[p2]; pos[p2] = temp
-        for (p in pos) printf "%02d : %s\n", p, pos[p]
-    }
-    ' "$BUILD_MAP" | sort -n > "$temp_map"
-    
-    mv "$temp_map" "$BUILD_MAP"
-    printf "%s✓ Swapped positions %s and %s%s\n" "$green" "$pos1" "$pos2" "$x"
-}
-
-# Update build map from filesystem
-remap_modules() {
-    [[ -d "$PARTS_DIR" ]] || { echo "Parts directory not found: $PARTS_DIR"; exit 1; }
-    
-    # Generate new map
-    find "$PARTS_DIR" -name "*.sh" -type f | sort | {
-        pos=1
-        while read -r file; do
-            basename_file=$(basename "$file")
-            printf "%02d : %s\n" "$pos" "$basename_file"
-            ((pos++))
-        done
-    } > "$BUILD_MAP"
-    
-    printf "%s✓ Regenerated build map with %d modules%s\n" "$green" "$(wc -l < "$BUILD_MAP")" "$x"
-}
-
-# List modules in build order
-list_modules() {
-    if read_build_map; then
-        printf "%sModules in build order:%s\n" "$green" "$x"
-        local pos=1
-        for num in $(printf '%s\n' "${!build_map_targets[@]}" | sort -n); do
-            printf "  %02d: %s\n" "$pos" "${build_map_targets[$num]}"
-            ((pos++))
-        done
-    else
-        printf "%sNo build map found - using auto-discovery%s\n" "$yellow" "$x"
-        local modules=()
-        while IFS= read -r -d '' file; do
-            modules+=("$(basename "$file")")
-        done < <(find "$PARTS_DIR" -name "[0-9]*_*.sh" -print0 | sort -z)
-        
-        for i in "${!modules[@]}"; do
-            printf "  %02d: %s\n" $((i+1)) "${modules[$i]}"
-        done
-    fi
-}
-
 main() {
     printf "%sBuilding script from numbered modular parts%s\n" "$blue" "$x";
     printf "Parts directory: %s\n" "$PARTS_DIR";
@@ -367,33 +279,23 @@ main() {
 # Help function  
 usage() {
     cat << EOF
-build.sh - Enhanced modular build system with advanced management
+build.sh - Assemble script from numbered modular parts (enhanced)
 
 USAGE:
-  ./build.sh [COMMAND|OPTIONS]
+  ./build.sh [OPTIONS]
 
-COMMANDS:
-  list                     List modules in build order
-  insert <file> [pos]      Insert module at position (default: 99)
-  swap <pos1> <pos2>       Swap two module positions
-  remap                    Regenerate build map from filesystem
-
-BUILD OPTIONS:
-  -h, --help               Show this help
-  -o FILE                  Output file (default: padlock.sh)
-  -p DIR                   Parts directory (default: parts)
-  -m FILE                  Build map file (default: build.map)
-  -r                       Rename mode: rename source files according to build map
-  -v                       Verbose mode
-  -c                       Clean (remove output file before building)
-  -l                       List discovered modules and exit
+OPTIONS:
+  -h, --help    Show this help
+  -o FILE       Output file (default: padlock.sh)
+  -p DIR        Parts directory (default: parts)
+  -m FILE       Build map file (default: build.map)
+  -r            Rename mode: rename source files according to build map
+  -v            Verbose mode
+  -c            Clean (remove output file before building)
+  -l            List discovered modules and exit
 
 EXAMPLES:
   ./build.sh                           # Build with defaults
-  ./build.sh list                      # List modules in build order
-  ./build.sh insert new_api.sh 6       # Insert new_api.sh at position 6
-  ./build.sh swap 3 7                  # Swap modules at positions 3 and 7
-  ./build.sh remap                     # Regenerate build map
   ./build.sh -o padlock.sh             # Custom output name
   ./build.sh -p modules -o script      # Custom parts dir and output
   ./build.sh -r                        # Rename source files using build.map
@@ -461,26 +363,6 @@ while [[ $# -gt 0 ]]; do
         (-v)
             set -x
             shift
-            ;;
-        (list)
-            list_modules
-            exit 0
-            ;;
-        (insert)
-            [[ $# -ge 2 ]] || { echo "ERROR: insert requires at least 1 argument" >&2; exit 1; }
-            shift
-            insert_module "$@"
-            exit 0
-            ;;
-        (swap)
-            [[ $# -ge 3 ]] || { echo "ERROR: swap requires 2 arguments" >&2; exit 1; }
-            shift
-            swap_modules "$@"
-            exit 0
-            ;;
-        (remap)
-            remap_modules
-            exit 0
             ;;
         (*)
             printf "%sERROR:%s Unknown option: %s\n" "$red" "$x" "$1" >&2

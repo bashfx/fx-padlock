@@ -30,6 +30,9 @@ dispatch() {
         master-unlock)
             do_master_unlock "$@"
             ;;
+        emergency-unlock)
+            do_emergency_unlock "$@"
+            ;;
         master)
             do_master "$@"
             ;;

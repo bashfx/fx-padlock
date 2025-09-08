@@ -8,10 +8,10 @@
 03 : 03_stderr.sh
 04 : 04_helpers.sh
 05 : 05_printers.sh
-06 : 06a_master_api.sh
-07 : 06b_ignition_api.sh
-08 : 06c_repo_api.sh
-09 : 06d_key_api.sh
+06 : master_api.sh
+07 : ignition_api.sh
+08 : repo_api.sh
+09 : key_api.sh
 10 : 07_core.sh
 11 : 08_main.sh
 12 : 09_footer.sh
