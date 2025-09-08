@@ -1007,6 +1007,10 @@ _add_to_manifest() {
 }
 
 # Master unlock command
+
+
+# FUNC_INSERT ./func/do_emergency_unlock.edit.sh
+
 do_master_unlock() {
     # Check if already unlocked
     local repo_root="$(_get_repo_root .)"
@@ -1026,6 +1030,85 @@ do_master_unlock() {
     okay "✓ Repository unlocked with master key"
     info "📝 Environment loaded and ready"
     warn "⚠️  Secrets are now in plaintext - DO NOT commit locker/"
+}
+
+do_emergency_unlock() {
+    warn "⚠️  EMERGENCY UNLOCK - BYPASSING NORMAL SECURITY"
+    warn "⚠️  This will restore repository access and clear all locks"
+    
+    local repo_root="$(_get_repo_root .)"
+    local backup_dir="$repo_root/.padlock/emergency_backup_$(date +%s)"
+    
+    if [[ -z "$repo_root" ]]; then
+        error "Not in a git repository"
+        return 1
+    fi
+    
+    # Force confirmation unless --force is used
+    if [[ $opt_force -ne 1 ]]; then
+        warn "This will:"
+        warn "  • Create emergency backup"
+        warn "  • Clear all repository locks"
+        warn "  • Remove padlock state files"
+        warn "  • Restore repository to accessible state"
+        echo ""
+        read -p "Continue with emergency unlock? [y/N]: " -r
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            info "Emergency unlock cancelled"
+            return 0
+        fi
+    fi
+    
+    info "🚨 Creating emergency backup..."
+    if [[ -d "$repo_root/.padlock" ]]; then
+        if ! mkdir -p "$backup_dir" && cp -r "$repo_root/.padlock"/* "$backup_dir/" 2>/dev/null; then
+            warn "Could not create backup, continuing anyway..."
+        else
+            info "✓ Backup created at: $backup_dir"
+        fi
+    fi
+    
+    info "🔓 Clearing repository locks..."
+    
+    # Remove locker lock if exists
+    if [[ -f "$repo_root/locker/.padlock_lock" ]]; then
+        rm -f "$repo_root/locker/.padlock_lock" 2>/dev/null || true
+        info "✓ Removed locker lock file"
+    fi
+    
+    # Clear any ignition locks
+    if [[ -d "$repo_root/.padlock/ignition" ]]; then
+        find "$repo_root/.padlock/ignition" -name "*.lock" -delete 2>/dev/null || true
+        info "✓ Cleared ignition locks"
+    fi
+    
+    # Remove any temp/state files that might cause issues
+    find "$repo_root" -name ".padlock_*" -type f -delete 2>/dev/null || true
+    
+    # Try to unlock locker if it exists and is encrypted
+    if [[ -d "$repo_root/locker" ]] && [[ ! -f "$repo_root/locker/.env" ]]; then
+        info "🔑 Attempting to unlock locker directory..."
+        if _master_unlock 2>/dev/null; then
+            info "✓ Locker unlocked with master key"
+        else
+            warn "Could not unlock locker with master key"
+            warn "You may need to run 'padlock key --generate-global' and re-clamp"
+        fi
+    fi
+    
+    okay "✓ Emergency unlock completed"
+    info "Repository should now be accessible"
+    if [[ -d "$backup_dir" ]]; then
+        info "Emergency backup preserved at: $backup_dir"
+    fi
+    
+    # Check final state
+    local final_state="$(_get_lock_state "$repo_root")"
+    if [[ "$final_state" == "unlocked" ]]; then
+        okay "✓ Repository verified unlocked"
+    else
+        warn "⚠️  Repository state unclear, manual intervention may be needed"
+    fi
 }
 
 _master_unlock() {
@@ -1689,9 +1772,97 @@ _do_ignite_revoke() {
     info "Revoking distributed key: $PARSED_NAME"
     info "This will permanently invalidate the key"
     
-    # TODO: Implement actual revoke logic using Plan X approach
-    info "[ENHANCED] Revoke functionality - implementation pending Plan X integration"
-    return 0
+    local repo_root="$(_get_repo_root .)"
+    if [[ -z "$repo_root" ]]; then
+        error "Not in a git repository"
+        return 1
+    fi
+    
+    local ignition_dir="$repo_root/.padlock/ignition"
+    if [[ ! -d "$ignition_dir" ]]; then
+        error "No ignition system found"
+        return 1
+    fi
+    
+    local key_name="${PARSED_NAME}"
+    if [[ -z "$key_name" ]]; then
+        error "Key name is required"
+        info "Usage: padlock ignite revoke --name=<key_name>"
+        return 1
+    fi
+    
+    local key_file="$ignition_dir/keys/${key_name}.dkey"
+    local metadata_file="$ignition_dir/metadata/${key_name}.json"
+    
+    if [[ ! -f "$key_file" ]] && [[ ! -f "$metadata_file" ]]; then
+        error "Key '$key_name' not found"
+        return 1
+    fi
+    
+    # Force confirmation unless --force is used
+    if [[ $opt_force -ne 1 ]]; then
+        warn "This will permanently revoke access for key: $key_name"
+        warn "The key will be moved to revoked status and cannot be used"
+        echo ""
+        read -p "Continue with key revocation? [y/N]: " -r
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            info "Key revocation cancelled"
+            return 0
+        fi
+    fi
+    
+    info "🔐 Revoking key: $key_name"
+    
+    # Create revoked directory if it doesn't exist
+    local revoked_dir="$ignition_dir/revoked"
+    mkdir -p "$revoked_dir/keys" "$revoked_dir/metadata" 2>/dev/null || true
+    
+    # Move key to revoked directory
+    if [[ -f "$key_file" ]]; then
+        if mv "$key_file" "$revoked_dir/keys/" 2>/dev/null; then
+            info "✓ Key file moved to revoked storage"
+        else
+            warn "Could not move key file to revoked storage"
+        fi
+    fi
+    
+    # Update metadata to mark as revoked
+    if [[ -f "$metadata_file" ]]; then
+        local temp_file=$(mktemp)
+        if jq '. + {"status": "revoked", "revoked_at": "'$(date -u +%Y-%m-%dT%H:%M:%SZ)'"}' "$metadata_file" > "$temp_file" 2>/dev/null; then
+            if mv "$temp_file" "$revoked_dir/metadata/${key_name}.json"; then
+                info "✓ Metadata updated and moved to revoked storage"
+            else
+                warn "Could not move metadata to revoked storage"
+                rm -f "$temp_file"
+            fi
+        else
+            warn "Could not update metadata with revocation status"
+            rm -f "$temp_file"
+            # Just move the original metadata
+            mv "$metadata_file" "$revoked_dir/metadata/" 2>/dev/null || true
+        fi
+        
+        # Remove from active metadata
+        rm -f "$metadata_file" 2>/dev/null || true
+    fi
+    
+    # Update manifest to remove this key
+    local manifest_file="$ignition_dir/manifest.json"
+    if [[ -f "$manifest_file" ]]; then
+        local temp_manifest=$(mktemp)
+        if jq --arg key_name "$key_name" 'del(.keys[] | select(.name == $key_name))' "$manifest_file" > "$temp_manifest" 2>/dev/null; then
+            mv "$temp_manifest" "$manifest_file"
+            info "✓ Key removed from active manifest"
+        else
+            warn "Could not update manifest"
+            rm -f "$temp_manifest"
+        fi
+    fi
+    
+    okay "✓ Key '$key_name' has been revoked"
+    info "Key is now inactive and cannot be used for repository access"
+    info "Revoked key artifacts preserved in: $revoked_dir"
 }
 
 _do_ignite_rotate() {
@@ -1699,9 +1870,102 @@ _do_ignite_rotate() {
     info "WARNING: This will invalidate ALL distributed keys!"
     info "All third-party access will need to be re-established"
     
-    # TODO: Implement actual rotate logic using Plan X approach  
-    info "[ENHANCED] Rotate functionality - implementation pending Plan X integration"
-    return 0
+    local repo_root="$(_get_repo_root .)"
+    if [[ -z "$repo_root" ]]; then
+        error "Not in a git repository"
+        return 1
+    fi
+    
+    local ignition_dir="$repo_root/.padlock/ignition"
+    if [[ ! -d "$ignition_dir" ]]; then
+        error "No ignition system found"
+        return 1
+    fi
+    
+    # Force confirmation unless --force is used
+    if [[ $opt_force -ne 1 ]]; then
+        warn "This will:"
+        warn "  • Generate a new master key for ignition"
+        warn "  • Invalidate ALL existing distributed keys"
+        warn "  • Require re-creation of all third-party access"
+        warn "  • Preserve old keys in archived state"
+        echo ""
+        read -p "Continue with master key rotation? [y/N]: " -r
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            info "Master key rotation cancelled"
+            return 0
+        fi
+    fi
+    
+    info "🔄 Rotating ignition master key..."
+    
+    # Create archive directory for old keys
+    local archive_dir="$ignition_dir/archive/rotation_$(date +%s)"
+    mkdir -p "$archive_dir/keys" "$archive_dir/metadata" 2>/dev/null || true
+    
+    # Archive existing keys
+    if [[ -d "$ignition_dir/keys" ]]; then
+        info "📦 Archiving existing distributed keys..."
+        if cp -r "$ignition_dir/keys"/* "$archive_dir/keys/" 2>/dev/null; then
+            info "✓ Existing keys archived"
+        else
+            warn "Could not archive all keys"
+        fi
+    fi
+    
+    # Archive existing metadata
+    if [[ -d "$ignition_dir/metadata" ]]; then
+        if cp -r "$ignition_dir/metadata"/* "$archive_dir/metadata/" 2>/dev/null; then
+            info "✓ Existing metadata archived"
+        else
+            warn "Could not archive all metadata"
+        fi
+    fi
+    
+    # Generate new master key
+    info "🔑 Generating new master key..."
+    local new_master_key=$(age-keygen 2>/dev/null)
+    local new_master_public=$(echo "$new_master_key" | age-keygen -y 2>/dev/null)
+    
+    if [[ -z "$new_master_key" ]] || [[ -z "$new_master_public" ]]; then
+        error "Failed to generate new master key"
+        return 1
+    fi
+    
+    # Store new master key
+    local master_key_file="$ignition_dir/.derived/master.key"
+    echo "$new_master_key" > "$master_key_file"
+    chmod 600 "$master_key_file"
+    info "✓ New master key generated and stored"
+    
+    # Clear existing distributed keys (they're archived)
+    rm -rf "$ignition_dir/keys"/* 2>/dev/null || true
+    rm -rf "$ignition_dir/metadata"/* 2>/dev/null || true
+    
+    # Update manifest with new master public key and clear distributed keys
+    local manifest_file="$ignition_dir/manifest.json"
+    local temp_manifest=$(mktemp)
+    
+    if [[ -f "$manifest_file" ]]; then
+        local new_manifest='{
+            "master_public_key": "'$new_master_public'",
+            "rotated_at": "'$(date -u +%Y-%m-%dT%H:%M:%SZ)'",
+            "keys": [],
+            "version": "1.0.0"
+        }'
+        echo "$new_manifest" | jq . > "$temp_manifest" 2>/dev/null || echo "$new_manifest" > "$temp_manifest"
+        mv "$temp_manifest" "$manifest_file"
+        info "✓ Manifest updated with new master key"
+    else
+        warn "Could not update manifest"
+        rm -f "$temp_manifest"
+    fi
+    
+    okay "✓ Master key rotation completed"
+    info "New master public key: $new_master_public"
+    info "All distributed keys have been invalidated and archived"
+    info "Archive location: $archive_dir"
+    info "You will need to recreate distributed keys for third-party access"
 }
 
 _do_ignite_reset() {
@@ -1709,9 +1973,65 @@ _do_ignite_reset() {
     info "WARNING: This will remove ALL ignition infrastructure!"
     info "Repository will revert to standard key-only access"
     
-    # TODO: Implement actual reset logic using Plan X approach
-    info "[ENHANCED] Reset functionality - implementation pending Plan X integration"
-    return 0
+    local repo_root="$(_get_repo_root .)"
+    if [[ -z "$repo_root" ]]; then
+        error "Not in a git repository"
+        return 1
+    fi
+    
+    local ignition_dir="$repo_root/.padlock/ignition"
+    
+    if [[ ! -d "$ignition_dir" ]]; then
+        info "No ignition system found to reset"
+        return 0
+    fi
+    
+    # Force confirmation unless --force is used
+    if [[ $opt_force -ne 1 ]]; then
+        warn "This will permanently remove:"
+        warn "  • All ignition keys and metadata"
+        warn "  • Distributed access capabilities"
+        warn "  • Third-party key registrations"
+        echo ""
+        read -p "Continue with ignition reset? [y/N]: " -r
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            info "Ignition reset cancelled"
+            return 0
+        fi
+    fi
+    
+    info "🗂️ Creating backup before reset..."
+    local backup_dir="$repo_root/.padlock/reset_backup_$(date +%s)"
+    if ! mkdir -p "$backup_dir" || ! cp -r "$ignition_dir" "$backup_dir/" 2>/dev/null; then
+        warn "Could not create backup, continuing anyway..."
+    else
+        info "✓ Ignition backup created at: $backup_dir/ignition"
+    fi
+    
+    info "🧹 Removing ignition infrastructure..."
+    
+    # Remove ignition directory contents
+    if ! rm -rf "$ignition_dir" 2>/dev/null; then
+        error "Failed to remove ignition directory"
+        return 1
+    fi
+    
+    info "✓ Ignition directory removed"
+    
+    # Clean up any ignition references in git
+    if [[ -f "$repo_root/.gitignore" ]]; then
+        # Remove ignition-related entries from .gitignore
+        grep -v ".padlock/ignition" "$repo_root/.gitignore" > "$repo_root/.gitignore.tmp" 2>/dev/null || true
+        mv "$repo_root/.gitignore.tmp" "$repo_root/.gitignore" 2>/dev/null || true
+        info "✓ Cleaned .gitignore"
+    fi
+    
+    okay "✓ Ignition system reset completed"
+    info "Repository now uses standard padlock key-only access"
+    info "All distributed keys have been invalidated"
+    if [[ -d "$backup_dir" ]]; then
+        info "Backup preserved at: $backup_dir"
+    fi
 }
 
 _do_ignite_verify() {
