@@ -1,0 +1,10 @@
+_create_ignition_distro_with_tty_magic
+_create_ignition_master_with_tty_magic
+do_declamp
+do_master
+do_repair
+do_rewind
+do_sec
+do_setup
+do_snapshot
+_unlock_ignition_with_tty_magic

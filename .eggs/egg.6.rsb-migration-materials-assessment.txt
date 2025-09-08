@@ -1,0 +1,174 @@
+🐔 PADLOCK RSB MIGRATION MATERIALS ASSESSMENT
+==================================================
+Date: 2025-09-08
+Target: fx-padlock project analysis for RSB migration planning
+Summary by: China the Summary Chicken
+Migration Location: rust/oodx/padlock
+
+## ESSENTIAL MATERIALS (MUST HAVE) 🔥
+
+### Critical Architecture Documentation
+1. **agents/ARCHITECTURE_CONSOLIDATION_REFERENCE.md** - CRITICAL REFERENCE
+   - Complete architectural assessment with validated metrics
+   - RSB migration readiness matrix with specific components
+   - Phase-based remediation plan with blocking issues identified
+   - Cross-referenced security-architecture intersection analysis
+
+2. **ROADMAP.md** - STRATEGIC FOUNDATION
+   - Complete MVP to RSB migration roadmap 
+   - Phase 0: Critical MVP stabilization (addresses blocking TODO stubs)
+   - Phase 1: RSB migration planning (hybrid architecture design)
+   - Phase 2: RSB core migration (gradual component migration)
+   - Success criteria and risk mitigation strategies
+
+3. **SESSION.md** - COMPREHENSIVE STATUS
+   - Mission overview and session objectives
+   - Critical status assessment (98% complete but UNSAFE)
+   - Complete documentation of 9 analysis files + 5 summary eggs
+   - Next session priorities and continuation insights
+
+### Security Analysis Foundation
+4. **agents/EDGAR_CRITICAL_SECURITY_RECOMMENDATIONS.md** - SECURITY BLUEPRINT
+   - Production embargo justification and resolution requirements
+   - Critical security gaps requiring immediate attention
+   - 5 TODO stubs in security functions (Lines 1516, 1583, 1692, 1702, 1712)
+
+5. **agents/EDGAR_CRYPTOGRAPHIC_ARCHITECTURE_EVALUATION.md** - CRYPTO DESIGN
+   - Hierarchical X→M→R→I→D authority chain analysis
+   - Security model evaluation for RSB migration planning
+
+### Architecture Assessment
+6. **agents/AA_ARCHITECTURE_ASSESSMENT.md** - TECHNICAL FOUNDATION
+   - Validated metrics: 7,409 lines (147% over RSB threshold)
+   - Critical violation: parts/06_api.sh = 4,518 lines (900% over limits)
+   - BashFX compliance assessment and RSB migration priorities
+
+7. **docs/CONCEPTS.md** - CONCEPTUAL FRAMEWORK
+   - Key hierarchy and command structure (X→M→R→I→D)
+   - Authority relationships and ignition key concepts
+   - Final clean command API specification
+
+### Development Context
+8. **docs/BASHFX-v3.md** - BUILD PATTERN REFERENCE
+   - BashFX architecture principles and philosophy
+   - XDG compliance standards for RSB hybrid approach
+   - "Herding Cats Architecture" methodology
+
+## VALUABLE MATERIALS (USEFUL REFERENCE) 📚
+
+### Security Research Archive
+9. **agents/EDGAR_SECURITY_THREAT_ASSESSMENT.md** - THREAT MODEL
+   - Complete security threat analysis for RSB design considerations
+   - TTY automation failure analysis
+   - Repository lockout prevention requirements
+
+10. **agents/SECURITY_ANALYSIS_ARCHIVE.md** - HISTORICAL RECORD
+    - Cross-referenced security archive for institutional knowledge
+    - Complete preservation of security analysis findings
+
+### Development Planning
+11. **agents/AA_DEV_TODO.md** - ACTIONABLE TASKS
+    - Specific development tasks derived from architecture analysis
+    - Implementation priorities for RSB migration preparation
+
+12. **agents/REQUIREMENTS.md** - FUNCTIONAL REQUIREMENTS
+    - Complete requirements analysis for RSB scope planning
+
+### Institutional Knowledge
+13. **agents/AA_OBSERVATIONS.md** - STRATEGIC INSIGHTS
+    - Key institutional learnings from architecture analysis
+    - BashFX scale validation and hybrid architecture viability
+
+## OPTIONAL MATERIALS (NICE TO HAVE) 🗂️
+
+### Pilot Research (SELECTIVE PRESERVATION)
+14. **pilot/age_tty_subversion/** - TTY AUTOMATION RESEARCH
+    - Contains 8+ TTY automation approaches under investigation
+    - Critical for resolving TODO stubs in security functions
+    - ESSENTIAL for completing TTY automation implementation
+
+15. **pilot/lattice_proxy/** - ADVANCED SECURITY RESEARCH
+    - Sophisticated security pattern investigations
+    - Valuable for future RSB security enhancements
+
+16. **pilot/temporal_chain/** - TIME-BASED SECURITY
+    - Upstream expiration research
+    - Repository-controlled auto-rotation concepts
+
+### Reference Architecture
+17. **parts/build.map** - BUILD SYSTEM REFERENCE
+    - BashFX build pattern implementation
+    - Useful for designing RSB hybrid build system
+
+18. **parts/02_config.sh** - CONFIGURATION PATTERNS
+    - XDG+ compliance implementation example
+    - Template for RSB configuration management
+
+### Testing Infrastructure
+19. **xbin/taskdb.sh** - TASK DASHBOARD
+    - Simple task management tool for RSB development
+
+20. **test_runner.sh & test_runner_modular.sh** - TEST FRAMEWORK
+    - Existing testing patterns for RSB test design
+
+## WHAT NOT TO BRING ❌
+
+### Temporary Analysis Artifacts
+- All .log files (ignition.log, core.log, helpers.log, etc.)
+- All duplicate analysis files (*_dups.log)
+- Function extraction artifacts in func/ directory (127 .edit.sh files)
+- Build output padlock.sh (will be regenerated)
+
+### Session-Specific Files
+- agents/SESSION.md (session-specific, covered by main SESSION.md)
+- agents/cache/ directory (ephemeral cache files)
+- .git/ directory (new RSB project will have its own git)
+
+### Development Debris
+- Backup files (build_enhanced.sh.backup)
+- Test artifacts (test.txt, ignition.export-test.key)
+- Checksum logs (checksums_simple.log, extract_and_checksum.sh)
+
+## MIGRATION PRIORITY MATRIX 🎯
+
+### TIER 1 - IMMEDIATE TRANSFER (Start RSB with these)
+- ROADMAP.md
+- SESSION.md  
+- agents/ARCHITECTURE_CONSOLIDATION_REFERENCE.md
+- docs/CONCEPTS.md
+- pilot/age_tty_subversion/ (TTY research)
+
+### TIER 2 - EARLY REFERENCE (Transfer within first week)
+- All EDGAR security analysis files
+- agents/AA_ARCHITECTURE_ASSESSMENT.md
+- docs/BASHFX-v3.md
+- parts/build.map and key config files
+
+### TIER 3 - BACKGROUND REFERENCE (Transfer as needed)
+- Remaining pilot research directories
+- Development planning documents
+- Testing infrastructure files
+
+## RSB MIGRATION SUCCESS CRITERIA ✅
+
+Based on this analysis, RSB migration will be successful when:
+
+1. **Architecture Violations Resolved**: 06_api.sh subdivided, TODO stubs completed
+2. **Security Foundation Solid**: All EDGAR recommendations implemented
+3. **TTY Automation Complete**: Research from pilot/age_tty_subversion integrated
+4. **Hybrid Architecture Functional**: Bash CLI + RSB core working together
+5. **All Critical Documentation Preserved**: Essential institutional knowledge transferred
+
+## SPECIAL NOTES 🚨
+
+- **CRITICAL**: pilot/age_tty_subversion/ contains research for resolving 5 TODO security stubs
+- **BLOCKING**: Cannot safely migrate until architecture violations are addressed
+- **INSTITUTIONAL**: This project validates BashFX → RSB migration patterns for future projects
+- **COMPLEXITY**: 61% of codebase (06_api.sh) needs immediate RSB migration
+- **FOUNDATION**: Excellent security architecture design, just needs implementation completion
+
+Total Essential Files: 8 critical + 6 valuable = 14 key documents
+Estimated Transfer Size: ~2MB of documentation + selective pilot research
+RSB Migration Readiness: BLOCKED but VIABLE with Phase 0 remediation
+
+🥚 This egg provides the complete roadmap for preserving institutional knowledge while avoiding clutter in the new RSB padlock project!

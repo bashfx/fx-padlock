@@ -1,0 +1,5 @@
+_create_ignition_distro_with_tty_magic
+_create_ignition_master_with_tty_magic
+_create_ignition_metadata
+do_setup
+_unlock_ignition_with_tty_magic

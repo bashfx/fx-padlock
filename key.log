@@ -1,0 +1,8 @@
+do_key
+do_revoke
+_revoke_local_access
+_revoke_ignition_access
+_setup_ignition_directories
+_create_ignition_metadata
+_store_key_bundle
+_load_key_bundle

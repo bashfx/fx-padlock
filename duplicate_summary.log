@@ -1,0 +1,7 @@
+=== DUPLICATE ANALYSIS SUMMARY ===
+Total duplicated functions: 37
+
+Helpers → Ignition: 5 duplicates
+Ignition → Repo: 23 duplicates
+Ignition → Key: 12 duplicates
+Master → Ignition: 10 duplicates

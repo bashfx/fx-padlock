@@ -1,0 +1,12 @@
+_create_ignition_distro_with_tty_magic
+_create_ignition_master_with_tty_magic
+_create_ignition_metadata
+do_key
+do_revoke
+do_setup
+_load_key_bundle
+_revoke_ignition_access
+_revoke_local_access
+_setup_ignition_directories
+_store_key_bundle
+_unlock_ignition_with_tty_magic
