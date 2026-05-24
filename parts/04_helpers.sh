@@ -338,10 +338,32 @@ _load_crypto_config() {
 _validate_age_installation() {
     if ! command -v age >/dev/null 2>&1; then
         error "age not installed"
-        info "Installing age..."
-        __install_age || fatal "Failed to install age"
+        info "Install age with your system package manager, then retry."
+        info "Set PADLOCK_ALLOW_AGE_INSTALL=1 to let padlock attempt installation."
+
+        if [[ "${PADLOCK_ALLOW_AGE_INSTALL:-}" == "1" ]]; then
+            info "PADLOCK_ALLOW_AGE_INSTALL=1 set; attempting age installation..."
+            __install_age || fatal "Failed to install age"
+        else
+            fatal "Refusing to auto-install age without PADLOCK_ALLOW_AGE_INSTALL=1"
+        fi
     fi
     trace "age available: $(age --version 2>/dev/null | head -1)"
+}
+
+_age_keygen_private_file() {
+    local key_file="$1"
+    local old_umask
+
+    old_umask="$(umask)"
+    umask 077
+    if age-keygen -o "$key_file" >/dev/null 2>&1; then
+        chmod 600 "$key_file"
+        umask "$old_umask"
+        return 0
+    fi
+    umask "$old_umask"
+    return 1
 }
 
 _append_gitattributes() {
@@ -758,7 +780,7 @@ _setup_ignition_system() {
     # 1. Generate the repository's ignition keypair
     local ignition_key_file="$REPO_ROOT/.chest/ignition.key"
     mkdir -p "$REPO_ROOT/.chest"
-    age-keygen -o "$ignition_key_file" 2>/dev/null
+    _age_keygen_private_file "$ignition_key_file" || fatal "Failed to generate ignition key"
     trace "Generated ignition keypair at $ignition_key_file"
 
     # 2. Get the public key of the ignition key - this will be used to encrypt the locker

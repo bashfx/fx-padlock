@@ -121,8 +121,7 @@ do_clamp() {
         repo_key_file="$PADLOCK_GLOBAL_KEY"
         if [[ ! -f "$repo_key_file" ]]; then
             info "🔑 Generating global key..."
-            age-keygen > "$repo_key_file"
-            chmod 600 "$repo_key_file"
+            _age_keygen_private_file "$repo_key_file" || fatal "Failed to generate global key"
         fi
         trace "Using global key"
     else
@@ -130,8 +129,7 @@ do_clamp() {
         repo_key_file="$PADLOCK_KEYS/$(basename "$REPO_ROOT").key"
         if [[ ! -f "$repo_key_file" ]]; then
             info "🔑 Generating repository key..."
-            age-keygen > "$repo_key_file"
-            chmod 600 "$repo_key_file"
+            _age_keygen_private_file "$repo_key_file" || fatal "Failed to generate repository key"
         fi
         trace "Using repo-specific key"
     fi
@@ -1710,4 +1708,3 @@ do_rewind() {
 
     okay "✓ Rewound to snapshot: $snapshot_name"
 }
-

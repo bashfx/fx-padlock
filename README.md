@@ -4,13 +4,29 @@
 
 Padlock transforms any git repository into a secure vault using the "locker pattern" - providing complete opacity to repository scrapers while maintaining a transparent developer experience.
 
-## 🚀 **Quick Start**
+## ⚠️ **Safety Status**
+
+Padlock mutates repository layout and encrypted/plaintext secret state. Until the
+new Ignite/Cage-backed design is fully proven, **do not run Padlock against a
+live repository**. Use `gitsim`-backed simulated homes and repositories for all
+validation.
+
+The safe proof entrypoint is:
+
+```bash
+bin/e2e.sh
+```
+
+## 🚀 **Historical Quick Start**
+
+The flow below documents the historical target UX. Treat it as design reference
+until the gitsim-only proof suite and Ignite service integration are complete.
 
 ```bash
 # Interactive setup with master key backup
 padlock setup
 
-# Deploy padlock to any git repository
+# Deploy padlock to a simulated/proven repository only
 padlock clamp /my/repo --generate
 
 # Work with plaintext locally
@@ -84,13 +100,13 @@ padlock clean-manifest            # Remove stale entries
 Comprehensive validation with ceremonious presentation:
 
 ```bash
-# Run full test suite (all tests now pass cleanly)
-./test_runner.sh
+# Run the safe gitsim-only proof
+bin/e2e.sh
 
 # Tests include:
 # - Build verification
 # - Command validation  
-# - E2E workflows (git & gitsim)
+# - E2E workflow in gitsim only
 # - Repair functionality
 # - Ignition backup system (with timeout handling)
 # - Map/Unmap & chest pattern functionality
@@ -195,7 +211,7 @@ padlock rewind before-changes     # Restore from snapshot
 ### **System Requirements**
 - **OS**: Linux, macOS (Windows via WSL)
 - **Shell**: Bash 4.0+
-- **Dependencies**: `age` (auto-installed if missing)
+- **Dependencies**: `age` and `age-keygen` installed ahead of time
 
 ### **Install Methods**
 ```bash
@@ -203,6 +219,9 @@ padlock rewind before-changes     # Restore from snapshot
 apt install age          # Debian/Ubuntu
 brew install age         # macOS
 pacman -S age           # Arch
+
+# Optional/explicit only:
+# PADLOCK_ALLOW_AGE_INSTALL=1 allows Padlock to attempt installation.
 
 # Global installation
 padlock install         # Installs to ~/.local/bin/
@@ -307,8 +326,8 @@ Padlock follows the BASHFX framework for maintainable bash development:
 # Build from modular parts
 ./build.sh
 
-# Run comprehensive tests  
-./test_runner.sh
+# Run the safe gitsim-only proof
+bin/e2e.sh
 
 # Development workflow
 func ls parts/06_api.sh           # List functions
